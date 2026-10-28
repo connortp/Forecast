@@ -1,0 +1,26 @@
+{
+  "name": "@forecast/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/http.ts",
+    "start": "tsx src/http.ts",
+    "stdio": "tsx src/stdio.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "express": "5",
+    "jose": "6",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/express": "5",
+    "@types/node": "22",
+    "tsx": "^4.23.15",
+    "typescript": "5.7.2",
+    "vitest": "2.1.8"
+  }
+}
