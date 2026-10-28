@@ -2,22 +2,22 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Condition } from "@/lib/engine";
+import sky from "@/lib/sky-index.json";
 
 export type TimeOfDay = "dawn" | "day" | "dusk" | "night";
 
-// Which photo plate (public/sky/<name>.jpg) fits this weather at this time of day,
-// and how much to dim it.
-export function plateFor(condition: Condition, time: TimeOfDay): { name: string; brightness: number } {
-  if (condition === "cloudy") return { name: "overcast", brightness: time === "night" ? 0.5 : time === "day" ? 1 : 0.8 };
-  if (condition === "rain" || condition === "storm") return { name: condition, brightness: time === "night" ? 0.6 : 1 };
-  if (time === "night") return { name: condition === "sunny" ? "night" : "night-cloudy", brightness: 1 };
-  if (time === "dawn" || time === "dusk") return { name: time, brightness: 1 };
-  return { name: condition === "sunny" ? "clear" : "partly", brightness: 1 };
+// The shared mapping from packages/design/sky/index.json: which photo plate (and optional
+// light loop) fits this weather at this time of day, and how much to dim it.
+export function plateFor(condition: Condition, time: TimeOfDay): { name: string; brightness: number; video?: string } {
+  const e = (sky.conditions as Record<Condition, Record<TimeOfDay, { plate: string; brightness?: number; video?: string }>>)[condition][time];
+  return { name: e.plate, brightness: e.brightness ?? 1, video: e.video };
 }
 
-const RAIN: Partial<Record<Condition, number>> = { rain: 60, storm: 140 };
+// Fine streaks for storms; rain has its own video loop.
+const RAIN: Partial<Record<Condition, number>> = { storm: 110 };
 
-type Plate = { name: string; brightness: number; id: number };
+type Plate = { name: string; brightness: number; video?: string; id: number };
+const filterFor = (brightness: number) => `blur(2px)${brightness < 1 ? ` brightness(${brightness})` : ""}`;
 
 export function Sky({ condition, timeOfDay }: { condition: Condition; timeOfDay: TimeOfDay }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -29,10 +29,19 @@ export function Sky({ condition, timeOfDay }: { condition: Condition; timeOfDay:
   useEffect(() => {
     setPlates((prev) => {
       const top = prev[prev.length - 1];
-      if (top.name === target.name && top.brightness === target.brightness) return prev;
+      if (top.name === target.name && top.brightness === target.brightness && top.video === target.video) return prev;
       return [top, { ...target, id: top.id + 1 }];
     });
-  }, [target.name, target.brightness]);
+  }, [target.name, target.brightness, target.video]);
+
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [videoOn, setVideoOn] = useState(false);
+  useEffect(() => {
+    const v = videoRef.current;
+    setVideoOn(false);
+    if (!v || !target.video || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    v.play().then(() => setVideoOn(true)).catch(() => {});
+  }, [target.video]);
 
   useEffect(() => {
     const cv = canvasRef.current!;
@@ -104,9 +113,23 @@ export function Sky({ condition, timeOfDay }: { condition: Condition; timeOfDay:
         <div
           key={p.id}
           className={`plate${i === plates.length - 1 ? " on" : ""}`}
-          style={{ backgroundImage: `url(/sky/${p.name}.jpg)`, filter: p.brightness < 1 ? `brightness(${p.brightness})` : undefined }}
+          style={{ backgroundImage: `url(/sky/${p.name}.jpg)`, filter: filterFor(p.brightness) }}
         />
       ))}
+      {target.video && (
+        <video
+          key={target.video}
+          ref={videoRef}
+          className={`plate${videoOn ? " on" : ""}`}
+          src={`/sky/${target.video}.mp4`}
+          poster={`/sky/${target.video}-poster.jpg`}
+          style={{ filter: filterFor(target.brightness) }}
+          muted
+          loop
+          playsInline
+          preload="metadata"
+        />
+      )}
       <div className="shade" />
       <canvas ref={canvasRef} />
       <div className="flash" ref={flashRef} />
