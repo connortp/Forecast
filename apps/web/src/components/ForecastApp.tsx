@@ -16,21 +16,45 @@ function currentTimeOfDay(): TimeOfDay {
   return h < 5 || h >= 21 ? "night" : h < 9 ? "dawn" : h < 17 ? "day" : "dusk";
 }
 
+// Serif headline with its last word in italic, the way the site and sign-up flow set them.
+const Accent = ({ text }: { text: string }) => {
+  const i = text.lastIndexOf(" ");
+  return i < 0 ? <em>{text}</em> : <>{text.slice(0, i + 1)}<em>{text.slice(i + 1)}</em></>;
+};
+
 const Mark = () => (
-  <svg viewBox="0 0 32 32" aria-hidden="true">
-    <circle cx="16" cy="16" r="6.5" fill="none" stroke="currentColor" strokeWidth="2" />
-    <path d="M16 2.5v4M16 25.5v4M2.5 16h4M25.5 16h4M6.4 6.4l2.9 2.9M22.7 22.7l2.9 2.9M6.4 25.6l2.9-2.9M22.7 9.3l2.9-2.9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+    <circle cx="12" cy="12" r="4.2" />
+    <path d="M12 2.5v2.6M12 18.9v2.6M2.5 12h2.6M18.9 12h2.6M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8" />
   </svg>
 );
 
+function Chips<K extends string>({ label, items, value, onPick }: { label: string; items: [K, string][]; value: K; onPick: (k: K) => void }) {
+  return (
+    <div className="chips" role="group" aria-label={label}>
+      {items.map(([k, text]) => (
+        <button key={k} type="button" className="chip" aria-pressed={value === k} onClick={() => onPick(k)}>{text}</button>
+      ))}
+    </div>
+  );
+}
+
 export function ForecastApp() {
   const [prefs, setPrefs] = useState<Prefs>({ scenario: "partly", tone: "spicy", time: "auto" });
+  const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}");
       setPrefs((p) => ({ ...p, ...saved, scenario: saved.scenario in SCENARIOS ? saved.scenario : p.scenario }));
     } catch {}
+  }, []);
+  // Past the hero, the sky softens behind the cards, like the sign-up flow.
+  useEffect(() => {
+    const onScroll = () => setScrolled(scrollY > innerHeight * 0.35);
+    onScroll();
+    addEventListener("scroll", onScroll, { passive: true });
+    return () => removeEventListener("scroll", onScroll);
   }, []);
   const update = (patch: Partial<Prefs>) =>
     setPrefs((p) => {
@@ -47,143 +71,115 @@ export function ForecastApp() {
   const tod = prefs.time === "auto" ? currentTimeOfDay() : prefs.time;
   const night = tod === "night";
   const upcoming = events(s, 0, t.until + 1).filter((e) => e.kind !== "save");
+  const bills = upcoming.filter((e) => e.kind === "bill");
   const safeDaily = Math.max(0, t.daily);
   const perPaycheck = s.buckets.reduce((n, b) => n + b.perPaycheck, 0);
   const date = heroDate();
   const conditionName = night && t.condition === "sunny" ? "Clear night" : CONDITION_NAME[t.condition];
-  const sub = t.pool < 0 ? `${money(-t.pool)} short until payday` : t.billCount ? `${money(t.bills)} in bills set aside` : "Bills covered until payday";
   const quip =
     t.pool < 0 && prefs.tone === "calm"
       ? `You're ${money(-t.pool)} short of covering bills before payday. Today stays at $0 until it lands.`
       : QUIPS[prefs.tone][t.condition];
 
   return (
-    <main className="wrap">
-      <section className="photo hero" aria-live="polite">
-        <Sky condition={t.condition} timeOfDay={tod} />
-        <nav className="nav" aria-label="Main">
-          <span className="brand"><Mark />Forecast</span>
-          <span className="label source">Example data</span>
-        </nav>
-        <div className="hero-body">
-          <div className="hero-date">{date.weekday}, <em>{date.monthDay}</em></div>
-          <div className="hero-num"><span className="c">$</span>{Math.round(t.safeToSpend).toLocaleString("en-US")}</div>
-          <span className="label">Safe to spend today</span>
-        </div>
+    <div className="app">
+      <Sky condition={t.condition} timeOfDay={tod} dim={scrolled} />
+
+      <header className="top">
+        <span className="brand"><Mark />Forecast</span>
+        <span className="label pill">Example data</span>
+      </header>
+
+      <section className="hero" aria-live="polite">
+        <span className="label">{date.weekday}, {date.monthDay}</span>
+        <div className="num"><span className="c">$</span>{Math.round(t.safeToSpend).toLocaleString("en-US")}</div>
+        <span className="label">Safe to spend</span>
         <a className="more" href="#details" aria-label="See the details">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
         </a>
       </section>
 
-      <section id="details" className="dark today">
-        <div className="today-top">
-          <div>
-            <span className="label">Today&apos;s forecast</span>
-            <div className="big">{conditionName}</div>
+      <main className="sheet" id="details">
+        <section className="glass card">
+          <span className="label eyebrow">Today&apos;s forecast</span>
+          <h2><Accent text={conditionName} /></h2>
+          <p className="quip">{quip}</p>
+          <div className="days" aria-label="Safe to spend for the next 7 days">
+            {days.map((d) => {
+              const v = Math.max(0, d.daily);
+              return (
+                <span key={d.day} className={`${d.day === 0 ? "now" : ""}${d.payday ? " pay" : ""}${v === 0 ? " short" : ""}`}>
+                  <i>{dayName(d.day)}</i>
+                  {d.payday ? "Pay" : money(v)}
+                </span>
+              );
+            })}
           </div>
-          <div className="meta">
-            <b>{t.until === 1 ? "Payday tomorrow" : `Payday in ${t.until} days`}</b>
-            <span>{sub}</span>
+          <div className="kv">
+            <div><span>Next paycheck</span><span>{t.until === 1 ? "Tomorrow" : `${longDate(t.until).split(",")[0]}, in ${t.until} days`}</span></div>
+            <div><span>{t.pool < 0 ? "Short until payday" : "Held for bills"}</span><span>{money(t.pool < 0 ? -t.pool : t.bills)}</span></div>
+            <div><span>Spent so far today</span><span>{money(s.spentToday)}</span></div>
           </div>
-        </div>
-        <div className="cells" aria-label="Safe to spend for the next 7 days">
-          {days.map((d) => {
-            const v = Math.max(0, d.daily);
-            return (
-              <div key={d.day} className={`cell${d.day === 0 ? " today" : ""}${d.payday ? " pay" : ""}${v === 0 ? " short" : ""}`}>
-                <span className="d">{dayName(d.day)}</span>
-                <span className="v">{d.payday ? "Pay" : money(v)}</span>
-              </div>
-            );
-          })}
-        </div>
-        <p className="quip-line">{quip}</p>
-      </section>
+        </section>
 
-      <div className="pair">
-        <section className="dark stage">
-          <div className="ui-card">
-            <div className="hd label"><span>Until payday</span><span>{shortDate(0)} – {shortDate(t.until)}</span></div>
-            <div className="bd">
-              <div className="row">
-                <span className="who"><i className="dot now" />Left today</span>
-                <span className="amt">{money(t.safeToSpend)}</span>
+        <section className="glass card">
+          <span className="label eyebrow">Until payday · {shortDate(0)} – {shortDate(t.until)}</span>
+          <h2>{bills.length ? <>{bills.length} bill{bills.length > 1 ? "s" : ""} before <em>payday</em>.</> : <>Nothing due before <em>payday</em>.</>}</h2>
+          <p>Already set aside, so they never show up as spendable.</p>
+          <div className="list">
+            {upcoming.map((e, i) => (
+              <div className="row" key={i}>
+                <span className="nm">{e.name}<small>{dayName(e.day)} · {shortDate(e.day)}</small></span>
+                <span className={`amt${e.kind === "pay" ? " in" : ""}`}>{e.kind === "pay" ? "+" : "−"}{money(e.amount)}</span>
               </div>
-              {upcoming.map((e, i) => (
-                <div className="row" key={i}>
-                  <span className="who"><i className={`dot ${e.kind === "pay" ? "in" : "out"}`} />{e.name}</span>
-                  <span className="when">{dayName(e.day)}</span>
-                  <span className={`amt${e.kind === "pay" ? " in" : ""}`}>{e.kind === "pay" ? "+" : "−"}{money(e.amount)}</span>
-                </div>
-              ))}
-            </div>
+            ))}
           </div>
-          <p className="note">
-            {t.billCount
-              ? `${t.billCount} bill${t.billCount > 1 ? "s" : ""} land before your paycheck on ${longDate(t.until)}. They're already set aside.`
-              : `Nothing due before your paycheck on ${longDate(t.until)}.`}
+        </section>
+
+        <section className="glass card">
+          <span className="label eyebrow">Savings</span>
+          <h2>Pay yourself <em>first</em>.</h2>
+          <p>{money(perPaycheck)} leaves every paycheck before anything looks spendable.</p>
+          <div className="list">
+            {s.buckets.map((b) => (
+              <div className="bucket" key={b.name}>
+                <span className="nm">{b.name}<small>+{money(b.perPaycheck)} each paycheck</small></span>
+                <span className="amt">{money(b.saved)}<small>of {money(b.goal)}</small></span>
+                <div className="bar"><i style={{ width: `${(b.saved / b.goal) * 100}%` }} /></div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="glass card">
+          <span className="label eyebrow">The math</span>
+          <h2>How today&apos;s number is <em>made</em>.</h2>
+          <div className="kv">
+            <div><span>Cash this morning</span><span>{money(t.startCash)}</span></div>
+            <div><span>Bills before payday ({t.billCount})</span><span>−{money(t.bills)}</span></div>
+            {t.saving > 0 && <div><span>Savings due before payday</span><span>−{money(t.saving)}</span></div>}
+            <div><span>Cushion</span><span>−{money(s.cushion)}</span></div>
+            <div><span>Spread over {t.until} day{t.until > 1 ? "s" : ""}</span><span>{money(safeDaily)} a day</span></div>
+            <div><span>Spent so far today</span><span>−{money(s.spentToday)}</span></div>
+          </div>
+          <div className="total"><span className="label">Safe to spend today</span><b>{money(t.safeToSpend)}</b></div>
+          <p className="fine">
+            Your last 7 days averaged {money(s.recentPace)} a day, {s.recentPace > safeDaily ? "a little above" : "comfortably under"} that pace.
           </p>
         </section>
 
-        <section className="dark stage">
-          <div className="ui-card">
-            <div className="hd label"><span>Savings, first</span><span>{money(s.buckets.reduce((n, b) => n + b.saved, 0))}</span></div>
-            <div className="bd">
-              {s.buckets.map((b) => (
-                <div className="bucket" key={b.name}>
-                  <div className="top"><span>{b.name}</span><span>{money(b.saved)} of {money(b.goal)}</span></div>
-                  <div className="bar"><i style={{ width: `${(b.saved / b.goal) * 100}%` }} /></div>
-                  <span className="when">+{money(b.perPaycheck)} each paycheck</span>
-                </div>
-              ))}
-            </div>
-          </div>
-          <p className="note">{money(perPaycheck)} moves to savings from every paycheck before anything counts as spendable.</p>
+        <section className="glass card demo">
+          <span className="label eyebrow">Try other skies</span>
+          <Chips label="Example scenarios" value={prefs.scenario} onPick={(k) => update({ scenario: k })}
+            items={(Object.keys(SCENARIOS) as ScenarioKey[]).map((k) => [k, SCENARIOS[k].label])} />
+          <Chips label="Time of day" value={prefs.time} onPick={(k) => update({ time: k })}
+            items={[["auto", "Now"], ["dawn", "Dawn"], ["day", "Day"], ["dusk", "Dusk"], ["night", "Night"]]} />
+          <Chips label="Voice" value={prefs.tone} onPick={(k) => update({ tone: k })}
+            items={[["calm", "Calm voice"], ["spicy", "Spicy voice"]]} />
         </section>
-      </div>
 
-      <section className="dark math">
-        <div className="math-head">
-          <h2>How today&apos;s number <em>is made.</em></h2>
-          <p>Cash this morning, minus everything already spoken for, spread evenly until payday.</p>
-        </div>
-        <div className="eq">
-          <div className="term"><span className="label">Cash</span><span className="v">{money(t.startCash)}</span></div>
-          <div className="term"><span className="label"><span>Bills</span><b>{t.billCount}</b></span><span className="v">−{money(t.bills + t.saving)}</span></div>
-          <div className="term"><span className="label">Cushion</span><span className="v">−{money(s.cushion)}</span></div>
-          <div className="term"><span className="label"><span>Days left</span><b>÷</b></span><span className="v">{t.until}</span></div>
-        </div>
-        <div className="result">
-          <span className="v">{money(t.safeToSpend)}</span>
-          <p>
-            That&apos;s <b>{money(safeDaily)} a day</b>
-            {s.spentToday ? <>, less the <b>{money(s.spentToday)}</b> you&apos;ve spent so far today</> : null}. Your last 7 days averaged{" "}
-            <b>{money(s.recentPace)} a day</b>, {s.recentPace > safeDaily ? "a little above" : "comfortably under"} that pace.
-          </p>
-        </div>
-      </section>
-
-      <section className="dark controls">
-        <div className="scen">
-          <span className="label">Example</span>
-          {(Object.keys(SCENARIOS) as ScenarioKey[]).map((k) => (
-            <button key={k} type="button" aria-pressed={prefs.scenario === k} onClick={() => update({ scenario: k })}>{SCENARIOS[k].label}</button>
-          ))}
-        </div>
-        <div className="scen">
-          <span className="label">Sky</span>
-          {(["auto", "dawn", "day", "dusk", "night"] as const).map((k) => (
-            <button key={k} type="button" aria-pressed={prefs.time === k} onClick={() => update({ time: k })}>{k === "auto" ? "Now" : k}</button>
-          ))}
-        </div>
-        <div className="scen">
-          <span className="label">Voice</span>
-          {(["calm", "spicy"] as const).map((k) => (
-            <button key={k} type="button" aria-pressed={prefs.tone === k} onClick={() => update({ tone: k })}>{k}</button>
-          ))}
-        </div>
-      </section>
-      <footer className="foot">Prototype on example data. Nothing here is a real account.</footer>
-    </main>
+        <p className="fine foot">Prototype on example data. Nothing here is a real account.</p>
+      </main>
+    </div>
   );
 }

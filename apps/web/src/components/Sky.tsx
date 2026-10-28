@@ -19,7 +19,7 @@ const RAIN: Partial<Record<Condition, number>> = { storm: 110 };
 type Plate = { name: string; brightness: number; video?: string; id: number };
 const filterFor = (brightness: number) => `blur(2px)${brightness < 1 ? ` brightness(${brightness})` : ""}`;
 
-export function Sky({ condition, timeOfDay }: { condition: Condition; timeOfDay: TimeOfDay }) {
+export function Sky({ condition, timeOfDay, dim = false }: { condition: Condition; timeOfDay: TimeOfDay; dim?: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const flashRef = useRef<HTMLDivElement>(null);
   const target = plateFor(condition, timeOfDay);
@@ -109,7 +109,7 @@ export function Sky({ condition, timeOfDay }: { condition: Condition; timeOfDay:
   }, [condition]);
 
   return (
-    <div className="sky" aria-hidden="true">
+    <div className={`sky${dim ? " dim" : ""}`} aria-hidden="true">
       {plates.map((p, i) => (
         <div
           key={p.id}
