@@ -52,8 +52,9 @@ export function Sky({ condition, timeOfDay }: { condition: Condition; timeOfDay:
     let drops: { x: number; y: number; v: number; l: number }[] = [];
 
     const build = () => {
-      W = innerWidth;
-      H = innerHeight;
+      const box = cv.parentElement!.getBoundingClientRect();
+      W = box.width;
+      H = box.height;
       cv.width = W * dpr;
       cv.height = H * dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -108,7 +109,7 @@ export function Sky({ condition, timeOfDay }: { condition: Condition; timeOfDay:
   }, [condition]);
 
   return (
-    <div className="scene" aria-hidden="true">
+    <div className="sky" aria-hidden="true">
       {plates.map((p, i) => (
         <div
           key={p.id}
