@@ -31,4 +31,5 @@ cd apps/ios/ForecastKit && swift test
 
 - Fonts are Newsreader (number, headlines), Geist (body), and Geist Mono (labels), all under the SIL Open Font License (`Forecast/Fonts/OFL.txt`).
 - Videos play muted and looped over their plate, and are skipped when Reduce Motion is on.
+- The first launch shows sign-up (`Forecast/Signup/`), on example data until Supabase Auth and Plaid Link are connected. Pass `-signedUp YES` to skip it or `-signedUp NO` to replay it.
 - Debug builds accept launch arguments for screenshots: `-scenario sunny|partly|rain|storm`, `-time auto|dawn|day|dusk|night`, `-tone calm|spicy`, `-openDetails YES`.
