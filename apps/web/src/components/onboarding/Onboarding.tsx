@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { today } from "@/lib/engine";
 import { heroDate, money, shortDate } from "@/lib/format";
 import { CADENCES, EXAMPLE, initialChoices, snapshotFrom, type Choices } from "./example";
-import { saveOnboarding, type Saved } from "./progress";
+import { saveOnboarding, saveSnapshot, type Saved } from "./progress";
 import "./onboarding.css";
 
 type Step = "welcome" | "email" | "code" | "bank" | "reading" | "payday" | "bills" | "savings" | "reveal";
@@ -67,6 +67,7 @@ export function Onboarding() {
   };
 
   const finish = () => {
+    saveSnapshot(snapshotFrom(c));
     saveOnboarding({ done: true, method });
     router.push("/");
   };
