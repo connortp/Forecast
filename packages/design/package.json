@@ -1,0 +1,11 @@
+{
+  "name": "@forecast/design",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Shared Forecast design assets: sky plates and loops used by the site, web app and iOS app.",
+  "files": ["sky"],
+  "exports": {
+    "./sky/index.json": "./sky/index.json",
+    "./sky/*": "./sky/*"
+  }
+}

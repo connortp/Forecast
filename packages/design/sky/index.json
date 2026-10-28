@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "plates": {
+    "clear": "clear.jpg",
+    "partly": "partly.jpg",
+    "overcast": "overcast.jpg",
+    "rain": "rain.jpg",
+    "storm": "storm.jpg",
+    "dawn": "dawn.jpg",
+    "dusk": "dusk.jpg",
+    "night": "night.jpg",
+    "night-cloudy": "night-cloudy.jpg"
+  },
+  "videos": {
+    "clouds": {
+      "src": "clouds.mp4",
+      "poster": "clouds-poster.jpg"
+    },
+    "rain": {
+      "src": "rain.mp4",
+      "poster": "rain-poster.jpg"
+    }
+  },
+  "conditions": {
+    "sunny": {
+      "dawn": {
+        "plate": "dawn"
+      },
+      "day": {
+        "plate": "clear"
+      },
+      "dusk": {
+        "plate": "dusk"
+      },
+      "night": {
+        "plate": "night"
+      }
+    },
+    "partly": {
+      "dawn": {
+        "plate": "dawn"
+      },
+      "day": {
+        "plate": "partly",
+        "video": "clouds"
+      },
+      "dusk": {
+        "plate": "dusk"
+      },
+      "night": {
+        "plate": "night-cloudy"
+      }
+    },
+    "cloudy": {
+      "dawn": {
+        "plate": "overcast",
+        "brightness": 0.8
+      },
+      "day": {
+        "plate": "overcast"
+      },
+      "dusk": {
+        "plate": "overcast",
+        "brightness": 0.8
+      },
+      "night": {
+        "plate": "overcast",
+        "brightness": 0.5
+      }
+    },
+    "rain": {
+      "dawn": {
+        "plate": "rain",
+        "video": "rain"
+      },
+      "day": {
+        "plate": "rain",
+        "video": "rain"
+      },
+      "dusk": {
+        "plate": "rain",
+        "video": "rain"
+      },
+      "night": {
+        "plate": "rain",
+        "brightness": 0.6,
+        "video": "rain"
+      }
+    },
+    "storm": {
+      "dawn": {
+        "plate": "storm"
+      },
+      "day": {
+        "plate": "storm"
+      },
+      "dusk": {
+        "plate": "storm"
+      },
+      "night": {
+        "plate": "storm",
+        "brightness": 0.6
+      }
+    }
+  },
+  "notes": "brightness is a multiplier (1 = unchanged) applied as a dark overlay or CSS filter. A video, when present, plays muted and looped over its plate; show the plate alone when the viewer prefers reduced motion."
+}
