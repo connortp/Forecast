@@ -16,5 +16,5 @@ pnpm --filter @forecast/site dev   # http://localhost:3001
 ## Not wired up yet
 
 - The waitlist form only validates and shows a message. It does not store emails.
-- Analytics (PostHog via `@forecast/analytics`) will be added with a snippet since this page has no bundler.
+- Analytics: PostHog via `@forecast/analytics`. `pnpm --filter @forecast/site build` copies `forecast-analytics.js` next to the page; without it (plain preview) or on localhost, nothing is sent. Events are listed in docs/analytics.md.
 - The Data section's privacy claims (read-only via Plaid, not sold, deleted on request) need to match the real policy before launch.

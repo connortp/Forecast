@@ -1,6 +1,9 @@
 <title>Forecast</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <meta name="description" content="Forecast tells you one number each morning: what you can safely spend today.">
+<!-- PostHog project key: public by design (it can only send events). See docs/analytics.md. -->
+<meta name="posthog-key" content="phc_uF6bfn3XUMPF69kvuhr7fXPg24KiFhmWhG8MoVHVqceG">
+<meta name="posthog-host" content="https://us.i.posthog.com">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@200;300;400;500;600&family=Geist+Mono:wght@400;500&display=swap">
@@ -549,10 +552,16 @@ footer .brand .wx { font-size: 24px; }
   </div>
 </footer>
 
+<script src="forecast-analytics.js"></script>
 <script>
 document.body.dataset.sky = "clear";
 (() => {
   const $ = id => document.getElementById(id);
+  // Analytics: no-ops if the bundle is missing (plain preview) or there is no key.
+  const fa = window.ForecastAnalytics;
+  const track = (event, props) => fa && fa.track(event, props);
+  if (fa && !/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) fa.init({ surface: "site" });
+  const VOICE = { plain: "plain", kind: "friendly", snark: "snarky" };
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const ICON = {
     sun: '<span class="sn"></span>',
@@ -670,8 +679,11 @@ document.body.dataset.sky = "clear";
 
   let auto = null;
   const order = ["clear", "cloudy", "stormy"];
-  document.querySelectorAll(".chip").forEach(c => c.addEventListener("click", () => { clearInterval(auto); renderHero(c.dataset.sky); }));
-  document.querySelectorAll(".seg button").forEach(b => b.addEventListener("click", () => { voice = b.dataset.voice; renderVoice(); }));
+  document.querySelectorAll(".chip").forEach(c => c.addEventListener("click", () => { clearInterval(auto); renderHero(c.dataset.sky); track("site_demo_condition_selected", { condition: c.dataset.sky }); }));
+  document.querySelectorAll(".seg button").forEach(b => b.addEventListener("click", () => { voice = b.dataset.voice; renderVoice(); track("site_demo_voice_selected", { voice: VOICE[voice] }); }));
+  document.querySelectorAll('a[href="#join"]').forEach(a => a.addEventListener("click", () => {
+    track("site_cta_clicked", { cta: "join_waitlist", location: a.closest("header") ? "nav" : "hero" });
+  }));
   document.querySelectorAll(".scen button").forEach(b => b.addEventListener("click", () => { scen = b.dataset.scen; renderVoice(); }));
 
   $("join-form").addEventListener("submit", e => {
@@ -679,6 +691,7 @@ document.body.dataset.sky = "clear";
     const v = $("email").value.trim(), msg = $("form-msg");
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) { msg.textContent = "Enter an email address, like you@example.com."; return; }
     msg.textContent = "Thanks. This is a preview, so your email wasn't saved.";
+    track("waitlist_joined", { source: "footer" });
     $("email").value = "";
   });
 
