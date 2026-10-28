@@ -51,6 +51,8 @@ The sky also follows the local time of day (dawn, day, dusk, night). Copy comes 
 
 ## Data model (first migration)
 
+Built and live: see [backend.md](backend.md) for the final schema. Differences from this sketch: the access token moved to `plaid_item_secrets` so the app can still list linked banks, and `transactions` also holds imported history (`source`, `imports`).
+
 | Table | Purpose | Client access |
 | --- | --- | --- |
 | `plaid_items` | One per linked institution, holds the access token and sync cursor | none |
