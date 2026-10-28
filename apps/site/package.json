@@ -1,0 +1,7 @@
+{
+  "name": "@forecast/site",
+  "private": true,
+  "scripts": {
+    "dev": "npx --yes serve@14.2.4 . -l 3001"
+  }
+}
