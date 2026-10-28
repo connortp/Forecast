@@ -114,8 +114,8 @@ export function Sky({ condition, timeOfDay }: { condition: Condition; timeOfDay:
 
       const orb = 1 - wx.gray * 1.2;
       if (orb > 0.2) {
-        const ox = W * (W >= 980 ? 0.42 : 0.78);
-        const oy = H * (timeOfDay === "day" ? 0.16 : night ? 0.18 : 0.42);
+        const ox = W * 0.76;
+        const oy = H * (timeOfDay === "day" ? 0.13 : night ? 0.15 : 0.24);
         const R = night ? 34 : 46;
         const gc = night ? "200,215,255" : timeOfDay === "day" ? "255,236,180" : "255,190,140";
         const glow = ctx.createRadialGradient(ox, oy, 0, ox, oy, R * 7);

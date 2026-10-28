@@ -9,4 +9,4 @@ const at = (d: number, from = new Date()) => {
 export const dayName = (d: number) => (d === 0 ? "Today" : d === 1 ? "Tmrw" : at(d).toLocaleDateString("en-US", { weekday: "short" }));
 export const shortDate = (d: number) => at(d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 export const longDate = (d: number) => at(d).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
-export const heroDate = () => at(0).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
+export const heroDate = () => at(0).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });

@@ -63,34 +63,35 @@ export function ForecastApp() {
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="10" r="5" fill="#ffc65c" /><path d="M7 19h11a3.6 3.6 0 0 0 .3-7.2A5 5 0 0 0 8.8 13 3 3 0 0 0 7 19Z" fill="#fff" /></svg>
           Forecast
         </div>
-        <div className="tone" role="group" aria-label="Personality">
-          {(["calm", "spicy"] as const).map((k) => (
-            <button key={k} type="button" aria-pressed={prefs.tone === k} onClick={() => update({ tone: k })}>
-              {k === "calm" ? "Calm" : "Spicy"}
-            </button>
-          ))}
-        </div>
       </header>
 
       <div className="app">
         <section className="hero" aria-live="polite">
-          <div className="eyebrow"><span>Safe to spend</span><span className="sep" /><span>{heroDate()}</span></div>
+          <div className="date">{heroDate()}</div>
           <div className="amount"><span className="cur">$</span><span>{Math.round(t.safeToSpend).toLocaleString("en-US")}</span></div>
-          <div className="cond">
-            <WeatherIcon condition={t.condition} night={night} />
-            <span>{night && t.condition === "sunny" ? "Clear night" : CONDITION_NAME[t.condition]}</span>
-          </div>
-          <p className="quip">{quip}</p>
-          <div className="stats">
-            <div className="stat">Payday <b>{t.until === 1 ? "tomorrow" : `in ${t.until}d`}</b></div>
-            <div className="stat">Bills ahead <b>{money(t.bills)}</b></div>
-            <div className="stat">Spent today <b>{money(s.spentToday)}</b></div>
-          </div>
+          <div className="caption">Safe to spend</div>
+          <a className="scroll-hint" href="#details" aria-label="See the details">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+          </a>
         </section>
 
         <section className="sheet">
           <div className="grab" />
-          <div className="stack">
+          <div className="stack" id="details">
+            <article className="card today-card">
+              <h2>Today&apos;s forecast</h2>
+              <div className="cond">
+                <WeatherIcon condition={t.condition} night={night} />
+                <span>{night && t.condition === "sunny" ? "Clear night" : CONDITION_NAME[t.condition]}</span>
+              </div>
+              <p className="quip">{quip}</p>
+              <div className="stats">
+                <div className="stat"><span>Payday</span><b>{t.until === 1 ? "Tomorrow" : `${t.until} days`}</b></div>
+                <div className="stat"><span>Bills ahead</span><b>{money(t.bills)}</b></div>
+                <div className="stat"><span>Spent today</span><b>{money(s.spentToday)}</b></div>
+              </div>
+            </article>
+
             <article className="card">
               <h2>Until payday <em>{shortDate(0)} – {shortDate(t.until)}</em></h2>
               <p className="lede">
@@ -212,6 +213,11 @@ export function ForecastApp() {
               <div className="seg" role="group" aria-label="Time of day">
                 {(["auto", "dawn", "day", "dusk", "night"] as const).map((k) => (
                   <button key={k} type="button" aria-pressed={prefs.time === k} onClick={() => update({ time: k })}>{k === "auto" ? "Now" : k[0].toUpperCase() + k.slice(1)}</button>
+                ))}
+              </div>
+              <div className="seg" role="group" aria-label="Personality">
+                {(["calm", "spicy"] as const).map((k) => (
+                  <button key={k} type="button" aria-pressed={prefs.tone === k} onClick={() => update({ tone: k })}>{k === "calm" ? "Calm voice" : "Spicy voice"}</button>
                 ))}
               </div>
             </div>
