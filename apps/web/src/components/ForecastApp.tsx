@@ -67,7 +67,7 @@ export function ForecastApp() {
 
       <div className="app">
         <section className="hero" aria-live="polite">
-          <div className="date">{heroDate()}</div>
+          <div className="date">{heroDate().weekday}, <em>{heroDate().monthDay}</em></div>
           <div className="amount"><span className="cur">$</span><span>{Math.round(t.safeToSpend).toLocaleString("en-US")}</span></div>
           <div className="caption">Safe to spend</div>
           <a className="scroll-hint" href="#details" aria-label="See the details">
@@ -175,7 +175,7 @@ export function ForecastApp() {
                       <svg className="ring" viewBox="0 0 48 48" aria-hidden="true">
                         <circle cx="24" cy="24" r="19" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="5" />
                         <circle cx="24" cy="24" r="19" fill="none" stroke={BUCKET_COLORS[i % BUCKET_COLORS.length]} strokeWidth="5" strokeLinecap="round" strokeDasharray={`${C * p} ${C}`} transform="rotate(-90 24 24)" />
-                        <text x="24" y="28" textAnchor="middle" fontSize="11" fill="#f4f1ea" className="mono">{Math.round(p * 100)}%</text>
+                        <text x="24" y="28" textAnchor="middle" fontSize="11" fill="#f5f5f4" className="mono">{Math.round(p * 100)}%</text>
                       </svg>
                       <div>
                         <div className="nm">{b.name}<span>{money(b.saved)} / {money(b.goal)}</span></div>
