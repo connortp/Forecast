@@ -519,8 +519,9 @@ document.body.dataset.sky = "clear";
 
   document.querySelectorAll(".chip").forEach(c => c.addEventListener("click", () => { renderSky(c.dataset.sky); track("site_demo_condition_selected", { condition: c.dataset.sky }); }));
   document.querySelectorAll(".seg button").forEach(b => b.addEventListener("click", () => { voice = b.dataset.voice; renderVoice(); track("site_demo_voice_selected", { voice: VOICE[voice] }); }));
-  document.querySelectorAll('a[href="#join"]').forEach(a => a.addEventListener("click", () => {
-    track("site_cta_clicked", { cta: "join_waitlist", location: a.closest(".nav") ? "nav" : "hero" });
+  const CTA = { "#join": "join_waitlist", "#math": "see_the_math" };
+  document.querySelectorAll('a[href="#join"], a.btn[href="#math"]').forEach(a => a.addEventListener("click", () => {
+    track("site_cta_clicked", { cta: CTA[a.getAttribute("href")], location: a.closest(".nav") ? "nav" : "hero" });
   }));
   document.querySelectorAll(".scen button").forEach(b => b.addEventListener("click", () => { scen = b.dataset.scen; renderVoice(); }));
 
