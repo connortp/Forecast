@@ -2,6 +2,10 @@
   "name": "@forecast/site",
   "private": true,
   "scripts": {
-    "dev": "npx --yes serve@14.2.4 . -l 3001"
+    "dev": "npx --yes serve@14.2.4 . -l 3001",
+    "build": "pnpm --filter @forecast/analytics build && cp ../../packages/analytics/dist/forecast-analytics.js ."
+  },
+  "dependencies": {
+    "@forecast/analytics": "workspace:*"
   }
 }
