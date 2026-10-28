@@ -1,7 +1,9 @@
 #!/bin/zsh
 # Archives the app and uploads it to TestFlight from this Mac.
 #
-# Signing is automatic. Either sign in to Xcode with your Apple ID (Settings > Accounts),
+# The archive signs automatically; the export re-signs with the "Apple Distribution" certificate
+# in your keychain and the "Forecast App Store" profile (both in the team's developer account).
+# Either sign in to Xcode with your Apple ID (Settings > Accounts),
 # or pass an App Store Connect API key:
 #   ASC_KEY_ID=XXXXXXXXXX ASC_ISSUER_ID=xxxxxxxx-... ASC_KEY_PATH=~/Downloads/AuthKey_XXXXXXXXXX.p8 scripts/testflight.sh
 set -euo pipefail
@@ -29,8 +31,11 @@ cat > "$OUT/ExportOptions.plist" <<PLIST
 <dict>
   <key>method</key><string>app-store-connect</string>
   <key>destination</key><string>upload</string>
-  <key>signingStyle</key><string>automatic</string>
+  <key>signingStyle</key><string>manual</string>
+  <key>signingCertificate</key><string>Apple Distribution</string>
   <key>teamID</key><string>ZUADR84P7U</string>
+  <key>provisioningProfiles</key>
+  <dict><key>com.connortp.forecast</key><string>Forecast App Store</string></dict>
   <key>uploadSymbols</key><true/>
 </dict>
 </plist>
