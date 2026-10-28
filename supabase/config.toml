@@ -13,3 +13,7 @@ verify_jwt = true
 # Plaid can't send a Supabase JWT; the function verifies Plaid's signature instead.
 [functions.plaid-webhook]
 verify_jwt = false
+
+# Sandbox only (404 in production): test bank without opening Link.
+[functions.sandbox-public-token]
+verify_jwt = true

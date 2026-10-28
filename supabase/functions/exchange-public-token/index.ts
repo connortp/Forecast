@@ -5,7 +5,7 @@
 import { admin, requireUser } from "../_shared/db.ts";
 import { handle, HttpError, json, readBody } from "../_shared/http.ts";
 import { plaid } from "../_shared/plaid.ts";
-import { syncItem } from "../_shared/sync.ts";
+import { syncItem, upsertAccounts } from "../_shared/sync.ts";
 
 Deno.serve(handle(async (req) => {
   const db = admin();
@@ -39,6 +39,13 @@ Deno.serve(handle(async (req) => {
     .from("plaid_item_secrets")
     .upsert({ item_id: item.id, access_token: ex.access_token }, { onConflict: "item_id" });
   if (secretError) throw secretError;
+
+  // Save accounts now: the first /transactions/sync often returns none while Plaid is still
+  // pulling history, and onboarding needs the account list right away.
+  const { accounts: plaidAccounts } = await plaid<{ accounts: Parameters<typeof upsertAccounts>[2] }>("/accounts/get", {
+    access_token: ex.access_token,
+  });
+  await upsertAccounts(db, item, plaidAccounts);
 
   // The first sync is often empty: Plaid is still pulling history. The webhook
   // (SYNC_UPDATES_AVAILABLE) fills it in, so a failure here is not fatal.

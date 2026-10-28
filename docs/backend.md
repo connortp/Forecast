@@ -36,8 +36,9 @@ Source in `supabase/functions`, shared code in `_shared`.
 | Function | Auth | Does |
 | --- | --- | --- |
 | `create-link-token` | user JWT | Link token for a new bank, or `{ item_id }` for update mode (re-login). Sets the webhook and, if configured, `redirect_uri` for OAuth banks. Requests 730 days of history. |
-| `exchange-public-token` | user JWT | `{ public_token, institution }` from Link's `onSuccess`. Stores the item and token, runs a first sync, returns the accounts. |
+| `exchange-public-token` | user JWT | `{ public_token, institution }` from Link's `onSuccess`. Stores the item and token, saves the accounts from `/accounts/get`, runs a first sync, returns the accounts. |
 | `sync-transactions` | user JWT | Pull-to-refresh: syncs all of the user's banks, or `{ item_id }`. |
+| `sandbox-public-token` | user JWT | Sandbox only (404 in production). Makes a test-bank public token without opening Link; pass the result straight to `exchange-public-token`. |
 | `plaid-webhook` | Plaid signature | `SYNC_UPDATES_AVAILABLE` syncs, `RECURRING_TRANSACTIONS_UPDATE` refreshes bills and paychecks, `ITEM` webhooks update the item's status. JWT check is off; every request is verified against the `Plaid-Verification` header instead. |
 
 Calling from a client:
@@ -67,13 +68,15 @@ With the Supabase CLI, linked to the project:
 ```sh
 supabase link --project-ref baylrzvbstukjsyfnlga
 supabase db push
-supabase functions deploy create-link-token exchange-public-token sync-transactions
+supabase functions deploy create-link-token exchange-public-token sync-transactions sandbox-public-token
 supabase functions deploy plaid-webhook --no-verify-jwt
 ```
 
 ## Trying it in sandbox
 
-Plaid Link in sandbox accepts `user_good` / `pass_good` at any institution. To exercise the webhook and history without Link, `/sandbox/public_token/create` makes a public token you can pass to `exchange-public-token`, and `/sandbox/item/fire_webhook` fires `SYNC_UPDATES_AVAILABLE`.
+Plaid Link in sandbox accepts `user_good` / `pass_good` at any institution. Without Link, call `sandbox-public-token` and pass its response to `exchange-public-token`.
+
+Verified 2026-10-28 with a throwaway user: the exchange returned the test bank's 5 accounts (only checking counted as cash), the `SYNC_UPDATES_AVAILABLE` webhook passed signature checks and filled 48 transactions and 8 recurring streams within seconds, a second sync was a no-op, and the client could read its own rows but got `permission denied` on `plaid_item_secrets` (and anon on everything).
 
 ## Not done yet
 
