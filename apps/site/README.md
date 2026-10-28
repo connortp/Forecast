@@ -8,10 +8,10 @@ pnpm --filter @forecast/site dev   # http://localhost:3001
 
 ## Design
 
-- Dark, cinematic page with rounded "windows" of sky. Direction: Origin Financial's polish, Carrot Weather's personality, (Not Boring) Weather's tactile objects.
-- Type: Instrument Serif for headlines, Geist for body and numbers, Geist Mono for labels.
-- Weather objects (sun, clouds, rain, payday coin) are pure CSS and scale with `font-size` (`.wx` components), so the web and iOS apps can reuse the same look.
-- The hero cycles Clear, Cloudy and Stormy; the phone mock and sky follow. The Personality section shows Plain, Friendly and Snarky voices.
+- Modeled on Origin Financial's site: near-black page (#0a0a0b), rounded panels that alternate between soft-focus sky photography and dark product panels (#121214), serif headlines with one italic word, mono uppercase labels and buttons.
+- Type: Newsreader (headlines and big dollar figures), Geist (body), Geist Mono (labels). Shared with apps/web.
+- Photos in `assets/` are generated stand-ins (sky, noon, dawn, golden, overcast, rain, dusk). Swap in licensed photography by replacing the files with the same names.
+- Conditions section switches Clear, Cloudy and Stormy; the photo and the sample week follow. Personality shows Plain, Friendly and Snarky voices (Carrot Weather's idea).
 
 ## Not wired up yet
 
