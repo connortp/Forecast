@@ -7,7 +7,11 @@ Native SwiftUI app. Same screen as the web app: the sky, the date, and one numbe
 1. Open `apps/ios/Forecast.xcodeproj` in Xcode 26 or later.
 2. Pick an iPhone simulator and press Run.
 
-To run on your own iPhone, choose your team under *Signing & Capabilities* for the Forecast target, plug in the phone, and pick it as the run destination.
+To run on your own iPhone, pick it as the run destination. Signing is automatic with team ZUADR84P7U and bundle ID `com.connortp.forecast`; Xcode needs to be signed in to that Apple account (Settings > Accounts).
+
+## TestFlight
+
+`scripts/testflight.sh` archives a Release build and uploads it to App Store Connect. The app record (bundle ID `com.connortp.forecast`) has to exist in App Store Connect first. See the script header for using an API key instead of the Xcode account.
 
 ## Layout
 
