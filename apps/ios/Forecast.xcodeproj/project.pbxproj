@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		F0000000000000000000A002 /* sky in Resources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000C002 /* sky */; };
 		F0000000000000000000A001 /* ForecastKit in Frameworks */ = {isa = PBXBuildFile; productRef = F0000000000000000000B001 /* ForecastKit */; };
+		F0000000000000000000A003 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = F0000000000000000000B002 /* Supabase */; };
+		F0000000000000000000A004 /* LinkKit in Frameworks */ = {isa = PBXBuildFile; productRef = F0000000000000000000B003 /* LinkKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -26,6 +28,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				F0000000000000000000A001 /* ForecastKit in Frameworks */,
+				F0000000000000000000A003 /* Supabase in Frameworks */,
+				F0000000000000000000A004 /* LinkKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -70,6 +74,8 @@
 			name = Forecast;
 			packageProductDependencies = (
 				F0000000000000000000B001 /* ForecastKit */,
+				F0000000000000000000B002 /* Supabase */,
+				F0000000000000000000B003 /* LinkKit */,
 			);
 			productName = Forecast;
 			productReference = F0000000000000000000C001 /* Forecast.app */;
@@ -101,6 +107,8 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				F0000000000000000000A501 /* XCLocalSwiftPackageReference "ForecastKit" */,
+				F0000000000000000000A502 /* XCRemoteSwiftPackageReference "supabase-swift" */,
+				F0000000000000000000A503 /* XCRemoteSwiftPackageReference "plaid-link-ios-spm" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = F0000000000000000000F002 /* Products */;
@@ -195,6 +203,7 @@
 				DEVELOPMENT_TEAM = ZUADR84P7U;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Forecast-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Forecast;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -225,6 +234,7 @@
 				DEVELOPMENT_TEAM = ZUADR84P7U;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Forecast-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Forecast;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -275,10 +285,39 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		F0000000000000000000A502 /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/supabase/supabase-swift.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.30.0;
+			};
+		};
+		F0000000000000000000A503 /* XCRemoteSwiftPackageReference "plaid-link-ios-spm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/plaid/plaid-link-ios-spm.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 6.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		F0000000000000000000B001 /* ForecastKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ForecastKit;
+		};
+		F0000000000000000000B002 /* Supabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F0000000000000000000A502 /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Supabase;
+		};
+		F0000000000000000000B003 /* LinkKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F0000000000000000000A503 /* XCRemoteSwiftPackageReference "plaid-link-ios-spm" */;
+			productName = LinkKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

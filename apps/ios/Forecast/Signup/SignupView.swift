@@ -1,12 +1,14 @@
 import SwiftUI
 import UserNotifications
+import Supabase
 import ForecastKit
 
 /// Sign-up, one idea per screen over the sky: account, bank, paydays, bills, savings,
-/// the morning notification, then the first number. Mirrors apps/web/src/components/onboarding.
-/// Runs on SignupExample until Supabase Auth and Plaid Link are connected.
+/// the morning notification, then the first number. Mirrors apps/web/src/components/onboarding,
+/// on the signed-in person's real Supabase and Plaid data.
 struct SignupView: View {
-    var onFinish: (Snapshot) -> Void
+    var session: AppSession
+    var showExample: () -> Void
 
     enum Step: Hashable { case welcome, email, code, bank, reading, payday, bills, savings, notify, reveal }
 
@@ -14,8 +16,17 @@ struct SignupView: View {
     @State private var trail: [Step] = []
     @State private var email = ""
     @State private var code = ""
-    @State private var showBank = false
-    @State private var choices = SignupExample.Choices()
+    @State private var busy = false
+    @State private var error: String?
+    @State private var bank = "your bank"
+
+    // What the person confirms along the way.
+    @State private var every = 14
+    @State private var payAmount = ""
+    @State private var payDate = Calendar.current.date(byAdding: .day, value: 7, to: .now) ?? .now
+    @State private var billsOff: Set<String> = []
+    @State private var buckets = SignupExample.Choices().buckets
+    @State private var cushion: Double = 150
     @State private var notifyHour = 7
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -32,12 +43,43 @@ struct SignupView: View {
         }
     }
 
+    // MARK: Live data
+
+    private var rows: Live.Rows? { session.loaded?.rows }
+    private var ymd: String { Live.localYmd() }
+    private var found: Live.FoundPaycheck? {
+        rows.flatMap { Live.findPaycheck(streams: $0.streams, settings: nil, today: ymd) }
+    }
+    /// Every regular outflow, including ones the person has turned off here.
+    private var bills: [Live.FoundBill] {
+        Live.findBills((rows?.streams ?? []).map { var s = $0; s.ignored = false; return s }, today: ymd)
+    }
+
+    private var settings: Backend.SettingsUpdate {
+        Backend.SettingsUpdate(
+            cushion: cushion,
+            payAmountOverride: found == nil ? Double(payAmount) : nil,
+            nextPaydayOverride: found == nil ? Live.localYmd(now: payDate) : nil,
+            payEveryDaysOverride: found.map { $0.every == every } == true ? nil : every)
+    }
+
+    /// The rows as the person has confirmed them so far, for the live number.
+    private var snapshot: Snapshot? {
+        guard var r = rows else { return nil }
+        let s = settings
+        r.streams = r.streams.map { var x = $0; x.ignored = billsOff.contains(x.id); return x }
+        r.buckets = buckets.map { Live.BucketRow(name: $0.name, goal: $0.goal, saved: 0, perPaycheck: $0.perPaycheck) }
+        r.settings = Live.Settings(cushion: s.cushion, payAmountOverride: s.payAmountOverride,
+                                   nextPaydayOverride: s.nextPaydayOverride, payEveryDaysOverride: s.payEveryDaysOverride)
+        return Live.snapshot(r, today: ymd)
+    }
+
     var body: some View {
         ZStack {
             SignupSky(scene: step == .welcome ? .clouds : step == .reveal ? .clear : .dim)
 
             VStack(spacing: 0) {
-                TopBar(stage: stage, canGoBack: !trail.isEmpty && step != .reading, back: back)
+                TopBar(stage: stage, canGoBack: !trail.isEmpty && ![.bank, .reading].contains(step), back: back)
                     .opacity((0..<5).contains(stage) ? 1 : 0)
                     .allowsHitTesting((0..<5).contains(stage))
                 screen
@@ -48,12 +90,10 @@ struct SignupView: View {
             .padding(.bottom, 8)
         }
         .foregroundStyle(.white)
-        .sheet(isPresented: $showBank) {
-            BankSheet { showBank = false; go(.reading) }
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-        }
         .sensoryFeedback(.selection, trigger: step)
+        // Signed in by code, by the email's link, or already signed in from before: pick up where they are.
+        .onChange(of: session.state, initial: true) { resume() }
+        .onChange(of: session.error) { _, e in if let e, step == .code { error = e } }
     }
 
     @ViewBuilder private var screen: some View {
@@ -61,21 +101,22 @@ struct SignupView: View {
         case .welcome: welcome
         case .email: emailScreen
         case .code: codeScreen
-        case .bank: bank
-        case .reading: ReadingScreen { go(.payday) }
+        case .bank: bankScreen
+        case .reading: reading
         case .payday: payday
-        case .bills: bills
+        case .bills: billsScreen
         case .savings: savings
         case .notify: notify
         case .reveal:
-            RevealScreen(today: today(SignupExample.snapshot(choices)), cushion: choices.cushion) {
-                onFinish(SignupExample.snapshot(choices))
+            if let snapshot {
+                RevealScreen(today: today(snapshot), cushion: cushion, busy: busy, error: error, finish: finish)
             }
         }
     }
 
     private func go(_ next: Step) {
         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.4)) {
+            error = nil
             trail.append(step)
             step = next
         }
@@ -83,7 +124,96 @@ struct SignupView: View {
 
     private func back() {
         guard let prev = trail.popLast() else { return }
-        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.4)) { step = prev == .reading ? .bank : prev }
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.4)) {
+            error = nil
+            step = prev == .reading ? .bank : prev
+        }
+    }
+
+    private func resume() {
+        guard session.state == .signedIn, let loaded = session.loaded, [.welcome, .email, .code].contains(step) else { return }
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.4)) {
+            error = nil
+            trail = []
+            step = loaded.hasBank ? .reading : .bank
+        }
+    }
+
+    /// Runs a step's network work with the buttons disabled, and shows any error under them.
+    private func attempt(_ work: @escaping @MainActor () async throws -> Void) {
+        busy = true
+        error = nil
+        Task {
+            do { try await work() } catch { self.error = error.localizedDescription }
+            busy = false
+        }
+    }
+
+    // MARK: Account
+
+    private func sendLink() {
+        attempt {
+            try await Backend.client.auth.signInWithOTP(email: email.trimmingCharacters(in: .whitespaces), redirectTo: Backend.redirect)
+            if step == .email { go(.code) }
+        }
+    }
+
+    private func verify() {
+        attempt {
+            do {
+                try await Backend.client.auth.verifyOTP(email: email.trimmingCharacters(in: .whitespaces), token: code, type: .email)
+            } catch {
+                throw Problem("That code didn't work. Check it, or send a new one.")
+            }
+            // The session's .signedIn moves on to the bank step.
+        }
+    }
+
+    // MARK: Bank
+
+    private struct LinkToken: Decodable { var linkToken: String }
+    private struct SandboxToken: Decodable { var publicToken: String; var institution: AnyJSON }
+
+    private func connect() {
+        attempt {
+            let token: LinkToken = try await Backend.call("create-link-token")
+            guard let linked = try await PlaidLink.open(token: token.linkToken) else { return }
+            let _: AnyJSON = try await Backend.call("exchange-public-token", [
+                "public_token": .string(linked.publicToken),
+                "institution": ["institution_id": .string(linked.institutionId), "name": .string(linked.institutionName)],
+            ])
+            bank = linked.institutionName
+            go(.reading)
+        }
+    }
+
+    /// Sandbox only: links Plaid's test user without opening Link.
+    private func testBank() {
+        attempt {
+            let sandbox: SandboxToken = try await Backend.call("sandbox-public-token")
+            let _: AnyJSON = try await Backend.call("exchange-public-token", ["public_token": .string(sandbox.publicToken), "institution": sandbox.institution])
+            bank = "a test bank"
+            go(.reading)
+        }
+    }
+
+    // MARK: Saving
+
+    private func saveAll(skipSavings: Bool = false) {
+        if skipSavings { for i in buckets.indices { buckets[i].perPaycheck = 0 } }
+        let settings = settings, streams = rows?.streams ?? [], billsOff = billsOff, buckets = buckets
+        attempt {
+            try await Backend.saveSignup(settings: settings, streams: streams, billsOff: billsOff, buckets: buckets)
+            go(.notify)
+        }
+    }
+
+    private func finish() {
+        attempt {
+            try await Backend.finishSignup()
+            // Root moves on to the forecast once the reload sees onboarded_at.
+            await session.reload()
+        }
     }
 
     // MARK: Screens
@@ -102,21 +232,25 @@ struct SignupView: View {
                 .accessibilityAddTraits(.isHeader)
             Text("What you can safely spend today, after bills and savings, until your next paycheck.")
                 .font(Typography.sans(15)).foregroundStyle(.white.opacity(0.76))
+            ErrorLine(error: error)
             VStack(spacing: 10) {
-                // Real Sign in with Apple arrives with Supabase Auth; this stands in for it.
-                SignupButton(title: "Continue with Apple", icon: "apple.logo") { go(.bank) }
-                SignupButton(title: "Continue with Google", icon: "g.circle", style: .ghost) { go(.bank) }
+                // Sign in with Apple and Google need their providers switched on in Supabase first.
+                SignupButton(title: "Continue with Apple", icon: "apple.logo") { error = "Apple sign-in isn't switched on yet. Use email for now." }
+                SignupButton(title: "Continue with Google", icon: "g.circle", style: .ghost) { error = "Google sign-in isn't switched on yet. Use email for now." }
                 SignupButton(title: "Use email instead", style: .text) { go(.email) }
             }
             Text("Already have an account? The same buttons sign you in.")
                 .font(Typography.sans(12)).foregroundStyle(.white.opacity(0.5))
+                .frame(maxWidth: .infinity)
+            Button("Look around with example data", action: showExample)
+                .font(Typography.sans(12)).underline().foregroundStyle(.white.opacity(0.5))
                 .frame(maxWidth: .infinity)
         }
     }
 
     private var emailScreen: some View {
         StepScreen(eyebrow: "Create your account", title: ("What's your ", "email", "?"),
-                   lead: "We'll send a six-digit code. No password to remember.") {
+                   lead: "We'll email you a sign-in link. No password to remember.") {
             VStack(alignment: .leading, spacing: 8) {
                 Eyebrow(text: "Email", color: .white.opacity(0.6))
                 TextField("", text: $email, prompt: Text("you@example.com").foregroundStyle(.white.opacity(0.4)))
@@ -126,26 +260,29 @@ struct SignupView: View {
                     .padding(16)
                     .glass(radius: 12)
                     .submitLabel(.send)
-                    .onSubmit { if email.contains("@") { go(.code) } }
+                    .onSubmit { if email.contains("@") && !busy { sendLink() } }
             }
+            ErrorLine(error: error)
         } actions: {
-            SignupButton(title: "Send code") { go(.code) }.disabled(!email.contains("@"))
+            SignupButton(title: busy ? "Sending…" : "Send link") { sendLink() }.disabled(!email.contains("@") || busy)
         }
     }
 
     private var codeScreen: some View {
         StepScreen(eyebrow: "Create your account", title: ("Check your ", "inbox", "."),
-                   lead: "We sent a code to \(email). Any six digits work in this preview.") {
+                   lead: "We sent a sign-in link to \(email). Open it on this iPhone and you'll come right back here. Got a six-digit code instead? Enter it below.") {
             CodeField(code: $code)
-            Button("Resend code") { code = "" }
+            Button("Resend email") { code = ""; sendLink() }
                 .font(Typography.mono(12, weight: 500)).tracking(1.4).textCase(.uppercase)
                 .foregroundStyle(.white.opacity(0.72))
+                .disabled(busy)
+            ErrorLine(error: error)
         } actions: {
-            SignupButton(title: "Verify") { go(.bank) }.disabled(code.count != 6)
+            SignupButton(title: busy ? "Checking…" : "Verify") { verify() }.disabled(code.count != 6 || busy)
         }
     }
 
-    private var bank: some View {
+    private var bankScreen: some View {
         StepScreen(eyebrow: "Connect your bank", title: ("Where does your ", "paycheck", " land?"),
                    lead: "Connect that checking account. Add cards and other banks later.") {
             VStack(spacing: 0) {
@@ -157,71 +294,136 @@ struct SignupView: View {
             }
             .padding(.horizontal, 16)
             .glass()
+            ErrorLine(error: error)
         } actions: {
-            SignupButton(title: "Connect bank") { showBank = true }
+            SignupButton(title: busy ? "Connecting…" : "Connect bank") { connect() }.disabled(busy)
+            if Backend.plaidSandbox {
+                SignupButton(title: "Use a test bank", style: .text) { testBank() }.disabled(busy)
+            }
         }
+    }
+
+    private var reading: some View {
+        let r = rows
+        let items: [(String, Bool)] = [
+            (r?.accounts.isEmpty == false ? "Balances from \(bank)" : "Balances", r?.accounts.isEmpty == false),
+            (r?.transactions.isEmpty == false ? "\(r!.transactions.count.formatted()) transactions" : "Transactions", r?.transactions.isEmpty == false),
+            ("Finding your paydays", r?.streams.contains { $0.direction == .inflow } == true),
+            ("Finding your bills", r?.streams.contains { $0.direction == .outflow } == true),
+        ]
+        return ReadingScreen(items: items)
+            // Wait for Plaid's history to land (its webhook fills it in), for up to 45 seconds.
+            .task {
+                let started = Date.now
+                while !Task.isCancelled {
+                    await session.reload()
+                    let r = session.loaded?.rows
+                    if (r.map { !$0.transactions.isEmpty && !$0.streams.isEmpty } ?? false) || Date.now.timeIntervalSince(started) > 45 { break }
+                    try? await Task.sleep(for: .seconds(2))
+                }
+                if let p = found { every = p.every }
+                try? await Task.sleep(for: reduceMotion ? .milliseconds(200) : .milliseconds(900))
+                if !Task.isCancelled { go(.payday) }
+            }
     }
 
     private var payday: some View {
-        let cadence = SignupExample.cadences.first { $0.every == choices.every } ?? SignupExample.cadences[1]
-        return StepScreen(eyebrow: "Your paydays", title: ("Looks like you're paid ", cadence.label, "."), lead: nil) {
-            VStack(alignment: .leading, spacing: 14) {
-                Eyebrow(text: SignupExample.employer, color: .white.opacity(0.6))
-                HStack(alignment: .firstTextBaseline) {
-                    Text(Fmt.money(SignupExample.paycheckAmount)).font(Typography.serif(42, weight: 300)).monospacedDigit()
-                    Spacer()
-                    Text("after tax").font(Typography.sans(13)).foregroundStyle(.white.opacity(0.7))
-                }
-                HStack(spacing: 4) {
-                    ForEach(0..<7, id: \.self) { i in
-                        let d = SignupExample.paycheckNextIn + i * choices.every
-                        VStack(spacing: 3) {
-                            Text(Fmt.month(d)).font(Typography.mono(9)).tracking(0.8).foregroundStyle(.white.opacity(0.6))
-                            Text(Fmt.dayOfMonth(d)).font(Typography.sans(12.5)).monospacedDigit()
+        let cadence = SignupExample.cadences.first { $0.every == every } ?? SignupExample.cadences[1]
+        let firstPay = snapshot?.paycheck.nextIn ?? found?.nextIn ?? 7
+        return StepScreen(eyebrow: "Your paydays",
+                          title: found != nil ? ("Looks like you're paid ", cadence.label, ".") : ("When do you get ", "paid", "?"),
+                          lead: found != nil ? nil : "We couldn't spot a paycheck yet. Tell us and we'll learn it as deposits land.") {
+            if let found {
+                VStack(alignment: .leading, spacing: 14) {
+                    Eyebrow(text: found.name, color: .white.opacity(0.6))
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(Fmt.money(found.amount)).font(Typography.serif(42, weight: 300)).monospacedDigit()
+                        Spacer()
+                        Text("after tax").font(Typography.sans(13)).foregroundStyle(.white.opacity(0.7))
+                    }
+                    HStack(spacing: 4) {
+                        ForEach(0..<7, id: \.self) { i in
+                            let d = firstPay + i * every
+                            VStack(spacing: 3) {
+                                Text(Fmt.month(d)).font(Typography.mono(9)).tracking(0.8).foregroundStyle(.white.opacity(0.6))
+                                Text(Fmt.dayOfMonth(d)).font(Typography.sans(12.5)).monospacedDigit()
+                            }
+                            .frame(maxWidth: .infinity).padding(.vertical, 7)
+                            .background(RoundedRectangle(cornerRadius: 10).fill(i == 0 ? Color(hex: 0x5B8FD6, opacity: 0.6) : .white.opacity(0.06)))
                         }
-                        .frame(maxWidth: .infinity).padding(.vertical, 7)
-                        .background(RoundedRectangle(cornerRadius: 10).fill(i == 0 ? Color(hex: 0x5B8FD6, opacity: 0.6) : .white.opacity(0.06)))
                     }
                 }
+                .padding(16)
+                .glass()
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    Eyebrow(text: "Each paycheck, after tax", color: .white.opacity(0.6))
+                    TextField("", text: $payAmount, prompt: Text("$2,000").foregroundStyle(.white.opacity(0.4)))
+                        .keyboardType(.decimalPad)
+                        .font(Typography.sans(16))
+                        .padding(16)
+                        .glass(radius: 12)
+                        .onChange(of: payAmount) { _, v in
+                            let clean = v.filter { $0.isNumber || $0 == "." }
+                            if clean != v { payAmount = clean }
+                        }
+                }
+                HStack {
+                    Eyebrow(text: "Next payday", color: .white.opacity(0.6))
+                    Spacer()
+                    DatePicker("Next payday", selection: $payDate,
+                               in: (Calendar.current.date(byAdding: .day, value: 1, to: .now) ?? .now)...,
+                               displayedComponents: .date)
+                        .labelsHidden()
+                        .colorScheme(.dark)
+                }
+                .padding(.horizontal, 16).padding(.vertical, 10)
+                .glass(radius: 12)
             }
-            .padding(16)
-            .glass()
-            Chips(options: SignupExample.cadences.map { ($0.every, $0.chip) }, selection: $choices.every)
+            Chips(options: SignupExample.cadences.map { ($0.every, $0.chip) }, selection: $every)
+            ErrorLine(error: error)
         } actions: {
-            SignupButton(title: "That's right") { go(.bills) }
+            SignupButton(title: found != nil ? "That's right" : "Continue") {
+                if found == nil && !(Double(payAmount) ?? 0 > 0) { error = "Add your paycheck amount." } else { go(.bills) }
+            }
         }
     }
 
-    private var bills: some View {
-        let total = zip(SignupExample.bills, choices.billsOn).filter { $0.1 }.reduce(0) { $0 + $1.0.amount }
-        return StepScreen(eyebrow: "Your bills", title: ("These come out ", "before", " payday."),
-                          lead: "Turn off anything that isn't a real bill.") {
-            VStack(spacing: 0) {
-                ForEach(Array(SignupExample.bills.enumerated()), id: \.offset) { i, b in
-                    if i > 0 { Divider().overlay(.white.opacity(0.1)) }
-                    Toggle(isOn: $choices.billsOn[i]) {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(b.name).font(Typography.sans(14.5))
-                                Text([Fmt.shortDate(b.dueIn), b.payee].compactMap { $0 }.joined(separator: " · "))
-                                    .font(Typography.sans(12)).foregroundStyle(.white.opacity(0.55))
+    private var billsScreen: some View {
+        let total = snapshot.map { today($0).bills } ?? 0
+        return StepScreen(eyebrow: "Your bills",
+                          title: bills.isEmpty ? ("No bills ", "yet", ".") : ("These come out ", "regularly", "."),
+                          lead: bills.isEmpty ? "We'll add them as they repeat. You can also add one later." : "Turn off anything that isn't a real bill.") {
+            if !bills.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(Array(bills.enumerated()), id: \.element.id) { i, b in
+                        let on = !billsOff.contains(b.id)
+                        if i > 0 { Divider().overlay(.white.opacity(0.1)) }
+                        Toggle(isOn: Binding(get: { on }, set: { if $0 { billsOff.remove(b.id) } else { billsOff.insert(b.id) } })) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(b.name).font(Typography.sans(14.5))
+                                    Text(Fmt.shortDate(b.dueIn) + (b.every == 30 ? "" : " · \(Self.repeats(b.every))"))
+                                        .font(Typography.sans(12)).foregroundStyle(.white.opacity(0.55))
+                                }
+                                Spacer()
+                                Text(Fmt.cents(b.amount)).font(Typography.sans(14.5)).monospacedDigit()
                             }
-                            Spacer()
-                            Text(Fmt.cents(b.amount)).font(Typography.sans(14.5)).monospacedDigit()
+                            .opacity(on ? 1 : 0.4)
+                            .strikethrough(!on)
                         }
-                        .opacity(choices.billsOn[i] ? 1 : 0.4)
-                        .strikethrough(!choices.billsOn[i])
+                        .tint(Color(hex: 0x5FBF86))
+                        .padding(.vertical, 11)
                     }
-                    .tint(Color(hex: 0x5FBF86))
-                    .padding(.vertical, 11)
                 }
+                .padding(.horizontal, 14)
+                .glass()
             }
-            .padding(.horizontal, 14)
-            .glass()
             HStack(alignment: .firstTextBaseline) {
-                Eyebrow(text: "Held for bills", color: .white.opacity(0.6))
+                Eyebrow(text: "Held for bills before payday", color: .white.opacity(0.6))
                 Spacer()
-                Text(Fmt.cents(total)).font(Typography.serif(21)).monospacedDigit().contentTransition(.numericText(value: total))
+                Text(Fmt.cents((total * 100).rounded() / 100)).font(Typography.serif(21)).monospacedDigit()
+                    .contentTransition(.numericText(value: total))
             }
             .padding(.horizontal, 4)
             .animation(.snappy, value: total)
@@ -230,20 +432,31 @@ struct SignupView: View {
         }
     }
 
+    private static func repeats(_ every: Int) -> String {
+        switch every {
+        case 7: "every week"
+        case 14: "every 2 weeks"
+        case 15: "twice a month"
+        case 365: "every year"
+        default: "every \(every) days"
+        }
+    }
+
     private var savings: some View {
-        StepScreen(eyebrow: "Savings", title: ("Pay yourself ", "first", "."),
-                   lead: "Set aside from each paycheck before anything looks spendable. Starts with your \(Fmt.shortDate(SignupExample.paycheckNextIn)) paycheck.") {
+        let firstPay = snapshot?.paycheck.nextIn ?? found?.nextIn ?? 7
+        return StepScreen(eyebrow: "Savings", title: ("Pay yourself ", "first", "."),
+                          lead: "Set aside from each paycheck before anything looks spendable. Starts with your \(Fmt.shortDate(firstPay)) paycheck.") {
             VStack(spacing: 0) {
-                ForEach(choices.buckets.indices, id: \.self) { i in
+                ForEach(buckets.indices, id: \.self) { i in
                     if i > 0 { Divider().overlay(.white.opacity(0.1)) }
                     HStack {
                         VStack(alignment: .leading, spacing: 1) {
-                            Text(choices.buckets[i].name).font(Typography.sans(14.5))
-                            Text("Goal \(Fmt.money(choices.buckets[i].goal)) · per paycheck").font(Typography.sans(12)).foregroundStyle(.white.opacity(0.55))
+                            Text(buckets[i].name).font(Typography.sans(14.5))
+                            Text("Goal \(Fmt.money(buckets[i].goal)) · per paycheck").font(Typography.sans(12)).foregroundStyle(.white.opacity(0.55))
                         }
                         Spacer()
-                        Stepper(value: $choices.buckets[i].perPaycheck, in: 0...2000, step: 10) {
-                            Text(Fmt.money(choices.buckets[i].perPaycheck)).font(Typography.sans(14.5)).monospacedDigit()
+                        Stepper(value: $buckets[i].perPaycheck, in: 0...2000, step: 10) {
+                            Text(Fmt.money(buckets[i].perPaycheck)).font(Typography.sans(14.5)).monospacedDigit()
                         }
                         .fixedSize()
                     }
@@ -256,25 +469,23 @@ struct SignupView: View {
                 HStack {
                     Eyebrow(text: "Cushion", color: .white.opacity(0.6))
                     Spacer()
-                    Text(Fmt.money(choices.cushion)).font(Typography.serif(21)).monospacedDigit()
+                    Text(Fmt.money(cushion)).font(Typography.serif(21)).monospacedDigit()
                 }
-                Slider(value: $choices.cushion, in: 0...500, step: 25).tint(.white)
+                Slider(value: $cushion, in: 0...500, step: 25).tint(.white)
                 Text("Always kept back, so a surprise charge doesn't turn into an overdraft.")
                     .font(Typography.sans(13)).foregroundStyle(.white.opacity(0.76))
             }
             .padding(16)
             .glass()
+            ErrorLine(error: error)
         } actions: {
-            SignupButton(title: "Continue") { go(.notify) }
-            SignupButton(title: "Skip savings for now", style: .text) {
-                for i in choices.buckets.indices { choices.buckets[i].perPaycheck = 0 }
-                go(.notify)
-            }
+            SignupButton(title: "Continue") { saveAll() }.disabled(busy)
+            SignupButton(title: "Skip savings for now", style: .text) { saveAll(skipSavings: true) }.disabled(busy)
         }
     }
 
     private var notify: some View {
-        let t = today(SignupExample.snapshot(choices))
+        let t = snapshot.map(today)
         return StepScreen(eyebrow: "Morning forecast", title: ("Want it ", "before", " you leave the house?"),
                           lead: "One notification a day, plus a heads-up the day before a big bill.") {
             HStack(alignment: .top, spacing: 10) {
@@ -286,8 +497,10 @@ struct SignupView: View {
                         Spacer()
                         Text("\(notifyHour):00 AM").font(.system(size: 12)).foregroundStyle(.secondary)
                     }
-                    Text("\(t.condition.name). \(Fmt.money(t.safeToSpend)) safe to spend today, \(t.until) days to payday.")
-                        .font(.system(size: 13))
+                    if let t {
+                        Text("\(t.condition.name). \(Fmt.money(t.safeToSpend)) safe to spend today, \(t.until) days to payday.")
+                            .font(.system(size: 13))
+                    }
                 }
             }
             .foregroundStyle(.black)
@@ -333,6 +546,8 @@ private struct SignupSky: View {
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .clipped()
+            // Children of a GeometryReader still sit inside the safe area, so this one has to opt out too.
+            .ignoresSafeArea()
         }
         .ignoresSafeArea()
         .animation(.easeInOut(duration: 1.4), value: scene)
@@ -340,7 +555,9 @@ private struct SignupSky: View {
 
     @ViewBuilder private func layer(_ name: String) -> some View {
         if let url = Self.url("\(name).jpg"), let image = UIImage(contentsOfFile: url.path) {
-            Image(uiImage: image).resizable().scaledToFill()
+            // A wide photo filled to the screen's height is far wider than the screen. In an overlay it
+            // still draws that wide but takes the screen's size, so it can't push the sky off the top.
+            Color.clear.overlay { Image(uiImage: image).resizable().scaledToFill() }
         }
     }
 
@@ -511,53 +728,54 @@ private struct CodeField: View {
     }
 }
 
+
+private struct ErrorLine: View {
+    var error: String?
+    var body: some View {
+        if let error {
+            Text(error).font(Typography.sans(13.5)).foregroundStyle(Color(hex: 0xFFB4A6))
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.updatesFrequently)
+        }
+    }
+}
+
 private struct ReadingScreen: View {
-    var done: () -> Void
-    @State private var index = 0
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    private let rows = ["Balances from \(SignupExample.bank)",
-                        "\(SignupExample.transactions.formatted()) transactions",
-                        "Finding your paydays", "Finding your bills"]
+    /// Each row's label, and whether it has landed yet.
+    var items: [(String, Bool)]
 
     var body: some View {
+        let running = items.firstIndex { !$0.1 }
         VStack(alignment: .leading, spacing: 18) {
             Spacer()
             Eyebrow(text: "Reading your sky", color: .white.opacity(0.66))
             (Text("Looking at your last ") + Text("90 days").font(Typography.serif(34, weight: 300, italic: true)) + Text("."))
                 .font(Typography.serif(34, weight: 300))
             VStack(alignment: .leading, spacing: 14) {
-                ForEach(rows.indices, id: \.self) { i in
+                ForEach(items.indices, id: \.self) { i in
                     HStack(spacing: 12) {
                         ZStack {
-                            if i < index {
+                            if items[i].1 {
                                 Image(systemName: "checkmark.circle.fill").font(.system(size: 17))
-                            } else if i == index {
+                            } else if i == running {
                                 ProgressView().controlSize(.small).tint(.white)
                             } else {
                                 Circle().stroke(.white.opacity(0.3), lineWidth: 1.5).frame(width: 16, height: 16)
                             }
                         }
                         .frame(width: 20)
-                        Text(rows[i]).font(Typography.sans(15))
-                            .foregroundStyle(.white.opacity(i < index ? 0.86 : i == index ? 1 : 0.45))
+                        Text(items[i].0).font(Typography.sans(15))
+                            .foregroundStyle(.white.opacity(items[i].1 ? 0.86 : i == running ? 1 : 0.45))
                     }
+                    .animation(.easeOut(duration: 0.3), value: items[i].1)
                 }
             }
-            Text("Usually under 30 seconds. You can close the app; we'll let you know when it's ready.")
+            Text("Usually under 30 seconds.")
                 .font(Typography.sans(12)).foregroundStyle(.white.opacity(0.5))
             Spacer()
             Spacer()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .task {
-            let step: Duration = reduceMotion ? .milliseconds(350) : .milliseconds(750)
-            for i in 1...rows.count {
-                try? await Task.sleep(for: step)
-                withAnimation(.easeOut(duration: 0.3)) { index = i }
-            }
-            try? await Task.sleep(for: step)
-            if !Task.isCancelled { done() }
-        }
         .accessibilityElement(children: .combine)
     }
 }
@@ -565,6 +783,8 @@ private struct ReadingScreen: View {
 private struct RevealScreen: View {
     var today: Today
     var cushion: Double
+    var busy: Bool
+    var error: String?
     var finish: () -> Void
     @State private var shown: Double = 0
     @State private var explain = false
@@ -576,7 +796,11 @@ private struct RevealScreen: View {
         if today.pool < 0 {
             return "You're \(Fmt.money(-today.pool)) short of covering \(bills) before you're paid on \(payday), so today stays at $0."
         }
-        return "That's what you can spend today and still cover \(bills) (\(Fmt.money(today.bills))) and keep your \(Fmt.money(cushion)) cushion until you're paid on \(payday)."
+        if today.safeToSpend.rounded() == 0 && today.daily > 0 {
+            return "You've already spent today's \(Fmt.money(today.daily)) share. It resets tomorrow, and you're paid on \(payday)."
+        }
+        let cover = today.billCount > 0 ? "cover \(bills) (\(Fmt.money(today.bills))) and " : ""
+        return "That's what you can spend today and still \(cover)keep your \(Fmt.money(cushion)) cushion until you're paid on \(payday)."
     }
 
     var body: some View {
@@ -602,7 +826,8 @@ private struct RevealScreen: View {
                 Eyebrow(text: "Your first forecast", color: .white.opacity(0.62))
                 Text(line).font(Typography.serif(18)).foregroundStyle(.white.opacity(0.92))
                     .fixedSize(horizontal: false, vertical: true)
-                SignupButton(title: "Open Forecast", action: finish)
+                ErrorLine(error: error)
+                SignupButton(title: busy ? "Opening…" : "Open Forecast", action: finish).disabled(busy)
             }
             .padding(16)
             .glass()
@@ -621,90 +846,6 @@ private struct RevealScreen: View {
             withAnimation(.easeOut(duration: 0.8)) { explain = true }
         }
         .sensoryFeedback(.success, trigger: explain)
-    }
-}
-
-/// Stands in for Plaid Link until it's connected: pick a bank, then the accounts Forecast may see.
-private struct BankSheet: View {
-    var done: () -> Void
-    @State private var picked: String?
-    @State private var selected = SignupExample.accounts.map(\.selected)
-
-    private let banks: [(String, UInt32)] = [("Harbor Federal", 0x1F4E79), ("Northline Bank", 0x2E6B4F), ("Summit Credit Union", 0x7A3B2E), ("First Meridian", 0x4B3F72)]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text((picked ?? "Bank connection · preview").uppercased())
-                .font(Typography.mono(10.5, weight: 500)).tracking(1.3).foregroundStyle(.secondary)
-            if picked == nil {
-                Text("Select your bank").font(.system(size: 19, weight: .medium))
-                Text("Plaid's bank search opens here")
-                    .font(.system(size: 14)).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12).background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemFill)))
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                    ForEach(banks, id: \.0) { name, color in
-                        Button { withAnimation { picked = name } } label: {
-                            VStack(alignment: .leading, spacing: 8) {
-                                RoundedRectangle(cornerRadius: 8).fill(Color(hex: color)).frame(width: 28, height: 28)
-                                    .overlay(Text(String(name.prefix(1))).font(Typography.serif(13)).foregroundStyle(.white))
-                                Text(name).font(.system(size: 13.5)).multilineTextAlignment(.leading)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(12)
-                            .background(RoundedRectangle(cornerRadius: 12).fill(Color(.systemBackground)))
-                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.separator)))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                Text("Sign-in happens on your bank's own screen.").font(.system(size: 11.5)).foregroundStyle(.secondary).frame(maxWidth: .infinity)
-            } else {
-                Text("Which accounts should Forecast see?").font(.system(size: 19, weight: .medium))
-                ForEach(SignupExample.accounts.indices, id: \.self) { i in
-                    let a = SignupExample.accounts[i]
-                    Toggle(isOn: $selected[i]) {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(a.name).font(.system(size: 14))
-                                Text("•••• \(a.mask)\(a.note.map { " · \($0)" } ?? "")").font(.system(size: 12)).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Text(Fmt.money(a.balance)).font(.system(size: 14)).monospacedDigit()
-                        }
-                    }
-                    .toggleStyle(CheckboxStyle())
-                    .padding(12)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(Color(.systemBackground)))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.separator)))
-                }
-                Button(action: done) {
-                    Text("CONTINUE").font(Typography.mono(12, weight: 500)).tracking(1.4)
-                        .frame(maxWidth: .infinity).padding(.vertical, 16)
-                        .foregroundStyle(.white).background(RoundedRectangle(cornerRadius: 12).fill(Color(hex: 0x111111)))
-                }
-                .buttonStyle(.plain)
-                Text("Read-only access. You can change this later.").font(.system(size: 11.5)).foregroundStyle(.secondary).frame(maxWidth: .infinity)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(20)
-        .padding(.top, 8)
-        .foregroundStyle(Color(hex: 0x111111))
-        .background(Color(hex: 0xF6F6F4))
-        .environment(\.colorScheme, .light)
-    }
-}
-
-private struct CheckboxStyle: ToggleStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        Button { configuration.isOn.toggle() } label: {
-            HStack(spacing: 10) {
-                Image(systemName: configuration.isOn ? "checkmark.square.fill" : "square").font(.system(size: 17))
-                configuration.label
-            }
-        }
-        .buttonStyle(.plain)
     }
 }
 
