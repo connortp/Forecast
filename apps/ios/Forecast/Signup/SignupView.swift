@@ -555,7 +555,9 @@ private struct SignupSky: View {
 
     @ViewBuilder private func layer(_ name: String) -> some View {
         if let url = Self.url("\(name).jpg"), let image = UIImage(contentsOfFile: url.path) {
-            Image(uiImage: image).resizable().scaledToFill()
+            // A wide photo filled to the screen's height is far wider than the screen. In an overlay it
+            // still draws that wide but takes the screen's size, so it can't push the sky off the top.
+            Color.clear.overlay { Image(uiImage: image).resizable().scaledToFill() }
         }
     }
 
