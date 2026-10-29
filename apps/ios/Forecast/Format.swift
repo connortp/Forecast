@@ -19,6 +19,15 @@ enum Fmt {
         d == 0 ? "Today" : d == 1 ? "Tmrw" : at(d).formatted(.dateTime.weekday(.abbreviated))
     }
 
+    /// Dollars with cents only when there are some: $65, $11.99.
+    static func cents(_ n: Double) -> String {
+        let hasCents = (n * 100).rounded().truncatingRemainder(dividingBy: 100) != 0
+        return "$" + n.formatted(.number.precision(.fractionLength(hasCents ? 2 : 0)).locale(Locale(identifier: "en_US")))
+    }
+
+    static func month(_ d: Int) -> String { at(d).formatted(.dateTime.month(.abbreviated)).uppercased() }
+    static func dayOfMonth(_ d: Int) -> String { at(d).formatted(.dateTime.day()) }
+
     static func shortDate(_ d: Int) -> String { at(d).formatted(.dateTime.month(.abbreviated).day()) }
     static func longDate(_ d: Int) -> String { at(d).formatted(.dateTime.weekday(.wide).month(.wide).day()) }
 }
