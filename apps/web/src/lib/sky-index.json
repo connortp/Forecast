@@ -103,5 +103,82 @@
       }
     }
   },
-  "notes": "brightness is a multiplier (1 = unchanged) applied as a dark overlay or CSS filter. A video, when present, plays muted and looped over its plate; show the plate alone when the viewer prefers reduced motion."
+  "notes": "brightness is a multiplier (1 = unchanged) applied as a dark overlay or CSS filter. A video, when present, plays muted and looped over its plate; show the plate alone when the viewer prefers reduced motion.",
+  "hero": {
+    "clear": {
+      "focus": [
+        0.5,
+        1
+      ],
+      "zoom": 1.3,
+      "scrim": 0.48,
+      "exposure": 1.0
+    },
+    "partly": {
+      "focus": [
+        0.5,
+        0
+      ],
+      "zoom": 1.45,
+      "wide": {
+        "zoom": 1.3
+      },
+      "scrim": 0.46,
+      "exposure": 0.78
+    },
+    "overcast": {
+      "scrim": 0.5,
+      "exposure": 1.0
+    },
+    "rain": {
+      "scrim": 0.5,
+      "exposure": 0.98
+    },
+    "storm": {
+      "scrim": 0.0,
+      "exposure": 1.0
+    },
+    "dawn": {
+      "focus": [
+        0.45,
+        1
+      ],
+      "zoom": 1.15,
+      "scrim": 0.14,
+      "exposure": 1.0
+    },
+    "dusk": {
+      "scrim": 0.0,
+      "exposure": 1.0
+    },
+    "night": {
+      "scrim": 0.0,
+      "exposure": 1.0
+    },
+    "night-cloudy": {
+      "focus": [
+        0.5,
+        1
+      ],
+      "zoom": 1.6,
+      "wide": {
+        "focus": [
+          0.5,
+          0.73
+        ],
+        "zoom": 1
+      },
+      "scrim": 0.0,
+      "exposure": 1.0
+    },
+    "clouds": {
+      "focus": [
+        0.5,
+        1
+      ],
+      "zoom": 1.3,
+      "scrim": 0.46,
+      "exposure": 0.78
+    }
+  }
 }

@@ -13,11 +13,34 @@ export function plateFor(condition: Condition, time: TimeOfDay): { name: string;
   return { name: e.plate, brightness: e.brightness ?? 1, video: e.video };
 }
 
+// How each photo sits behind the number, from index.json "hero" (tuned by
+// packages/design/scripts/hero-contrast.py): where it's framed, how far it's zoomed, how much
+// its exposure comes down, and how strong the soft scrim behind the number is. `wide` reframes
+// it for landscape windows.
+type Framing = { focus?: number[]; zoom?: number };
+type Hero = Framing & { scrim?: number; exposure?: number; wide?: Framing };
+const HERO = sky.hero as Record<string, Hero>;
+
+export function heroFor(name: string) {
+  const h = HERO[name] ?? {};
+  const wide = { ...h, ...h.wide };
+  const [fx, fy] = h.focus ?? [0.5, 0.5];
+  const [wx, wy] = wide.focus ?? [0.5, 0.5];
+  return {
+    exposure: h.exposure ?? 1,
+    scrim: h.scrim ?? 0,
+    vars: {
+      "--fx": `${fx * 100}%`, "--fy": `${fy * 100}%`, "--z": h.zoom ?? 1,
+      "--wfx": `${wx * 100}%`, "--wfy": `${wy * 100}%`, "--wz": wide.zoom ?? 1,
+    } as React.CSSProperties,
+  };
+}
+
 // Fine streaks for storms; rain has its own video loop.
 const RAIN: Partial<Record<Condition, number>> = { storm: 110 };
 
 type Plate = { name: string; brightness: number; video?: string; id: number };
-const filterFor = (brightness: number) => `blur(2px)${brightness < 1 ? ` brightness(${brightness})` : ""}`;
+const filterFor = (brightness: number) => `blur(2px)${brightness < 1 ? ` brightness(${+brightness.toFixed(3)})` : ""}`;
 
 export function Sky({ condition, timeOfDay, dim = false }: { condition: Condition; timeOfDay: TimeOfDay; dim?: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -34,6 +57,7 @@ export function Sky({ condition, timeOfDay, dim = false }: { condition: Conditio
     });
   }, [target.name, target.brightness, target.video]);
 
+  const video = target.video ? heroFor(target.video) : null;
   const videoRef = useRef<HTMLVideoElement>(null);
   const [videoOn, setVideoOn] = useState(false);
   useEffect(() => {
@@ -110,13 +134,16 @@ export function Sky({ condition, timeOfDay, dim = false }: { condition: Conditio
 
   return (
     <div className={`sky${dim ? " dim" : ""}`} aria-hidden="true">
-      {plates.map((p, i) => (
-        <div
-          key={p.id}
-          className={`plate${i === plates.length - 1 ? " on" : ""}`}
-          style={{ backgroundImage: `url(/sky/${p.name}.jpg)`, filter: filterFor(p.brightness) }}
-        />
-      ))}
+      {plates.map((p, i) => {
+        const h = heroFor(p.name);
+        return (
+          <div
+            key={p.id}
+            className={`plate${i === plates.length - 1 ? " on" : ""}`}
+            style={{ ...h.vars, backgroundImage: `url(/sky/${p.name}.jpg)`, filter: filterFor(p.brightness * h.exposure) }}
+          />
+        );
+      })}
       {target.video && (
         <video
           key={target.video}
@@ -124,7 +151,7 @@ export function Sky({ condition, timeOfDay, dim = false }: { condition: Conditio
           className={`plate${videoOn ? " on" : ""}`}
           src={`/sky/${target.video}.mp4`}
           poster={`/sky/${target.video}-poster.jpg`}
-          style={{ filter: filterFor(target.brightness) }}
+          style={{ ...video?.vars, filter: filterFor(target.brightness * (video?.exposure ?? 1)) }}
           muted
           loop
           playsInline
@@ -132,6 +159,7 @@ export function Sky({ condition, timeOfDay, dim = false }: { condition: Conditio
         />
       )}
       <div className="shade" />
+      <div className="scrim" style={{ opacity: dim ? 0 : videoOn && video ? video.scrim : heroFor(target.name).scrim }} />
       <canvas ref={canvasRef} />
       <div className="flash" ref={flashRef} />
     </div>
