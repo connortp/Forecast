@@ -115,7 +115,7 @@ enum Backend {
         var sort: Int
     }
 
-    static func saveSignup(settings: SettingsUpdate, streams: [Live.Stream], billsOff: Set<String>, buckets: [Bucket]) async throws {
+    static func saveSignup(settings: SettingsUpdate, streams: [Live.Stream], billsOff: Set<String>, buckets: [ForecastKit.Bucket]) async throws {
         guard let uid = userId else { throw Problem("You're signed out. Sign in again.") }
         let db = client
         try await db.from("settings").update(settings, returning: .minimal).eq("user_id", value: uid.uuidString).execute()
