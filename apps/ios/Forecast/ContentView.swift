@@ -71,6 +71,7 @@ struct ContentView: View {
                     LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 28)
                     Color.black
                 }
+                .ignoresSafeArea(edges: .bottom)
             }
             // Past the hero the sky softens behind the cards, like the sign-up flow.
             .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y > $0.containerSize.height * 0.35 } action: { _, past in
