@@ -6,6 +6,10 @@
 # Either sign in to Xcode with your Apple ID (Settings > Accounts),
 # or pass an App Store Connect API key:
 #   ASC_KEY_ID=XXXXXXXXXX ASC_ISSUER_ID=xxxxxxxx-... ASC_KEY_PATH=~/Downloads/AuthKey_XXXXXXXXXX.p8 scripts/testflight.sh
+#
+# EXPORT_SIGNING=automatic lets Apple sign the export with a cloud-managed distribution
+# certificate instead, so a machine without the certificate (GitHub Actions) can upload.
+# It needs the API key above, with the Admin role.
 set -euo pipefail
 cd "${0:A:h}/.."
 
@@ -24,6 +28,15 @@ xcodebuild archive \
   -allowProvisioningUpdates "${auth[@]}" \
   CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
 
+if [[ "${EXPORT_SIGNING:-manual}" == automatic ]]; then
+  signing="<key>signingStyle</key><string>automatic</string>"
+else
+  signing="<key>signingStyle</key><string>manual</string>
+  <key>signingCertificate</key><string>Apple Distribution</string>
+  <key>provisioningProfiles</key>
+  <dict><key>com.connortp.forecast</key><string>Forecast App Store</string></dict>"
+fi
+
 cat > "$OUT/ExportOptions.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -31,11 +44,8 @@ cat > "$OUT/ExportOptions.plist" <<PLIST
 <dict>
   <key>method</key><string>app-store-connect</string>
   <key>destination</key><string>upload</string>
-  <key>signingStyle</key><string>manual</string>
-  <key>signingCertificate</key><string>Apple Distribution</string>
+  $signing
   <key>teamID</key><string>ZUADR84P7U</string>
-  <key>provisioningProfiles</key>
-  <dict><key>com.connortp.forecast</key><string>Forecast App Store</string></dict>
   <key>uploadSymbols</key><true/>
 </dict>
 </plist>
