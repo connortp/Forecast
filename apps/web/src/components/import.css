@@ -1,0 +1,13 @@
+/* The /import preview. Uses the app's glass cards; these are only the pieces it adds. */
+.im { padding-top: max(12vh, 72px); }
+.im-head { text-align: center; display: grid; gap: 12px; justify-items: center; padding: 0 6px 12px; text-shadow: 0 2px 28px rgba(0,0,0,.25); }
+.im-head .label { color: rgba(255,255,255,.86); }
+.im-head h1 { margin: 0; font: 300 clamp(38px, 30px + 3vw, 56px)/1.04 var(--serif); letter-spacing: -.02em; text-wrap: balance; }
+.im-head h1 em { font-style: italic; }
+.im-head p { margin: 0; color: var(--soft); max-width: 440px; text-wrap: pretty; }
+.im-drop { display: grid; justify-items: center; gap: 4px; padding: 30px 20px; text-align: center; cursor: pointer; border-style: dashed; border-color: rgba(255,255,255,.28); transition: border-color .2s, background .2s; }
+.im-drop:hover, .im-drop.over { border-color: #fff; background: rgba(255,255,255,.12); }
+.im-drop b { font-weight: 500; font-size: 16px; }
+.im-drop span { color: var(--faint); font-size: 13px; }
+.im-unsure { opacity: .5; }
+.im-link { background: none; border: 0; padding: 0; color: #fff; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; font-size: inherit; }
