@@ -65,6 +65,13 @@ struct ContentView: View {
             }
             .scrollIndicators(.hidden)
             .ignoresSafeArea(edges: .bottom)
+            // Cards fade out just below the status bar instead of sliding under the clock, as in Weather.
+            .mask {
+                VStack(spacing: 0) {
+                    LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 28)
+                    Color.black
+                }
+            }
             // Past the hero the sky softens behind the cards, like the sign-up flow.
             .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y > $0.containerSize.height * 0.35 } action: { _, past in
                 pastHero = past
@@ -72,17 +79,6 @@ struct ContentView: View {
             .refreshable {
                 if case .live(_, let session) = source { await session.refresh() }
             }
-
-            // Once the cards scroll, the sky fades in under the status bar so the clock never sits on card text.
-            VStack {
-                LinearGradient(colors: [Palette.shade.opacity(0.85), Palette.shade.opacity(0)], startPoint: .top, endPoint: .bottom)
-                    .frame(height: 64)
-                    .ignoresSafeArea(edges: .top)
-                Spacer()
-            }
-            .allowsHitTesting(false)
-            .opacity(pastHero ? 1 : 0)
-            .animation(.easeInOut(duration: 0.4), value: pastHero)
         }
         .sensoryFeedback(.selection, trigger: scenario)
     }
