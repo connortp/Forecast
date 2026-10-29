@@ -1,0 +1,19 @@
+# Supabase CLI config for Forecast. Hosted project ref: baylrzvbstukjsyfnlga
+project_id = "forecast"
+
+[functions.create-link-token]
+verify_jwt = true
+
+[functions.exchange-public-token]
+verify_jwt = true
+
+[functions.sync-transactions]
+verify_jwt = true
+
+# Plaid can't send a Supabase JWT; the function verifies Plaid's signature instead.
+[functions.plaid-webhook]
+verify_jwt = false
+
+# Sandbox only (404 in production): test bank without opening Link.
+[functions.sandbox-public-token]
+verify_jwt = true
