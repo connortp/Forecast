@@ -150,7 +150,9 @@ export function MathCard({ s, t }: { s: Snapshot; t: Today }) {
     <section className="glass card">
       <span className="label eyebrow">The math</span>
       <h2>How today&apos;s number is <em>made</em>.</h2>
-      <p>{money(t.startCash)} in checking this morning, split {t.pool < 0 ? "and it doesn't cover everything" : "before anything counts as spendable"}.</p>
+      <p>{t.pool < 0
+        ? `${money(t.startCash)} in checking this morning, ${money(-t.pool)} short of what's due before payday.`
+        : `${money(t.startCash)} in checking this morning, split up before anything counts as spendable.`}</p>
       <div className="dt-split" role="img" aria-label={parts.map((p) => `${p.label} ${money(p.amount)}`).join(", ")}>
         {parts.map((p) => p.amount > 0 && <i key={p.key} className={`seg ${p.key}`} style={{ flexGrow: p.amount / total }} />)}
         {t.pool < 0 && <b className="dt-cashline" style={{ left: `${(t.startCash / total) * 100}%` }} />}

@@ -355,7 +355,9 @@ private struct MathCard: View {
         let parts = splitToday(snapshot, today)
         let total = max(today.startCash, parts.reduce(0) { $0 + $1.amount }, 1)
         Card(eyebrow: "The math", title: "How today's number is made.") {
-            Para(text: "\(Fmt.money(today.startCash)) in checking this morning, split \(today.pool < 0 ? "and it doesn't cover everything" : "before anything counts as spendable").")
+            Para(text: today.pool < 0
+                 ? "\(Fmt.money(today.startCash)) in checking this morning, \(Fmt.money(-today.pool)) short of what's due before payday."
+                 : "\(Fmt.money(today.startCash)) in checking this morning, split up before anything counts as spendable.")
             GeometryReader { geo in
                 let gaps = CGFloat(parts.filter { $0.amount > 0 }.count - 1) * 3
                 HStack(spacing: 3) {
