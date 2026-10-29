@@ -2,17 +2,38 @@ import SwiftUI
 import ForecastKit
 
 struct ContentView: View {
+    /// Where the number comes from: the signed-in person's bank, or the example scenarios.
+    enum Source {
+        case example(exit: () -> Void)
+        case live(Backend.Loaded, AppSession)
+    }
+
+    var source: Source
     @AppStorage("scenario") private var scenario: Scenario = .partly
     @AppStorage("tone") private var tone: Tone = .spicy
     @AppStorage("time") private var timeSetting = "auto"
 
     private var timeOfDay: TimeOfDay { TimeOfDay(rawValue: timeSetting) ?? .now }
 
+    private var snapshot: Snapshot? {
+        switch source {
+        case .example: scenario.snapshot
+        case .live(let loaded, _): loaded.snapshot
+        }
+    }
+
     var body: some View {
-        let s = scenario.snapshot
+        if let s = snapshot {
+            forecast(s)
+        } else if case .live(_, let session) = source {
+            NoPaycheck(session: session)
+        }
+    }
+
+    private func forecast(_ s: Snapshot) -> some View {
         let t = today(s)
 
-        ZStack {
+        return ZStack {
             SkyView(condition: t.condition, timeOfDay: timeOfDay)
 
             ScrollViewReader { proxy in
@@ -21,7 +42,12 @@ struct ContentView: View {
                         Hero(amount: t.safeToSpend)
                             .containerRelativeFrame(.vertical)
                         DetailsSheet(snapshot: s, today: t, tone: tone, night: timeOfDay == .night) {
-                            DemoControls(scenario: $scenario, tone: $tone, time: $timeSetting)
+                            switch source {
+                            case .example(let exit):
+                                DemoControls(scenario: $scenario, tone: $tone, time: $timeSetting, exit: exit)
+                            case .live(_, let session):
+                                LiveControls(session: session)
+                            }
                         }
                         .id("details")
                     }
@@ -33,6 +59,9 @@ struct ContentView: View {
             }
             .scrollIndicators(.hidden)
             .ignoresSafeArea(edges: .bottom)
+            .refreshable {
+                if case .live(_, let session) = source { await session.refresh() }
+            }
         }
         .sensoryFeedback(.selection, trigger: scenario)
     }
@@ -102,6 +131,7 @@ private struct DemoControls: View {
     @Binding var scenario: Scenario
     @Binding var tone: Tone
     @Binding var time: String
+    var exit: () -> Void
 
     var body: some View {
         VStack(spacing: 12) {
@@ -114,8 +144,72 @@ private struct DemoControls: View {
                 .foregroundStyle(Palette.ink3)
                 .multilineTextAlignment(.center)
                 .padding(.top, 6)
+            Button("Back to sign in", action: exit)
+                .font(Typography.mono(11.5, weight: 500)).tracking(1.3).textCase(.uppercase)
+                .foregroundStyle(Palette.ink2)
         }
         .padding(.top, 12)
+    }
+}
+
+/// The bottom of the sheet on real data: refresh, sign out, and a note while Plaid is in sandbox.
+private struct LiveControls: View {
+    var session: AppSession
+    @State private var refreshing = false
+
+    var body: some View {
+        VStack(spacing: 12) {
+            if Backend.plaidSandbox { Eyebrow(text: "Sandbox bank · test data from Plaid") }
+            HStack(spacing: 8) {
+                Pill(title: refreshing ? "Refreshing…" : "Refresh from bank") {
+                    refreshing = true
+                    Task { await session.refresh(); refreshing = false }
+                }
+                .disabled(refreshing)
+                Pill(title: "Sign out") { Task { await session.signOut() } }
+            }
+            if let error = session.error {
+                Text(error).font(Typography.sans(12)).foregroundStyle(Palette.ink2).multilineTextAlignment(.center)
+            }
+        }
+        .padding(.top, 12)
+    }
+}
+
+/// Signed in and set up, but there's no paycheck to count toward (say, every deposit stopped).
+private struct NoPaycheck: View {
+    var session: AppSession
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("No paycheck in sight").font(Typography.serif(30, weight: 300))
+            Text("Forecast needs a regular deposit to count toward. Pull in your latest transactions, or check back after your next payday.")
+                .font(Typography.sans(14)).foregroundStyle(Palette.ink2).multilineTextAlignment(.center)
+            HStack(spacing: 8) {
+                Pill(title: "Refresh from bank") { Task { await session.refresh() } }
+                Pill(title: "Sign out") { Task { await session.signOut() } }
+            }
+        }
+        .padding(32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Palette.sheet)
+        .foregroundStyle(Palette.ink)
+    }
+}
+
+private struct Pill: View {
+    var title: String
+    var action: () -> Void
+
+    var body: some View {
+        Button(title, action: action)
+            .font(Typography.sans(13, weight: 500))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .foregroundStyle(Palette.ink2)
+            .background(Palette.card, in: Capsule())
+            .overlay(Capsule().strokeBorder(Palette.line))
+            .buttonStyle(.plain)
     }
 }
 
