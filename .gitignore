@@ -17,3 +17,6 @@ xcuserdata/
 DerivedData/
 .build/
 .swiftpm/
+
+# Xcode makes this on first open
+*.xcodeproj/project.xcworkspace/

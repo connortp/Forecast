@@ -1,0 +1,46 @@
+# Uploads the iOS app to TestFlight whenever iOS code lands on main, or on demand
+# (Actions > iOS TestFlight > Run workflow). Signing is cloud-managed through the
+# App Store Connect API key, so no certificates live in the repo or in secrets.
+#
+# Secrets: ASC_KEY_ID, ASC_ISSUER_ID, and ASC_KEY_P8 (the whole AuthKey_*.p8 file).
+
+name: iOS TestFlight
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - apps/ios/**
+      - packages/design/sky/**
+      - .github/workflows/ios-testflight.yml
+  workflow_dispatch:
+
+concurrency:
+  group: ios-testflight
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Engine tests
+        working-directory: apps/ios/ForecastKit
+        run: swift test
+
+      - name: Archive and upload
+        working-directory: apps/ios
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          EXPORT_SIGNING: automatic
+          DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+        run: |
+          export ASC_KEY_PATH="$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
+          printf '%s' "$ASC_KEY_P8" > "$ASC_KEY_PATH"
+          export BUILD_NUMBER="$(date -u +%Y%m%d%H%M)"
+          ./scripts/testflight.sh
+          echo "Uploaded build $BUILD_NUMBER from ${GITHUB_SHA::7}" >> "$GITHUB_STEP_SUMMARY"
