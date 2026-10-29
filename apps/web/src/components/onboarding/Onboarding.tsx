@@ -296,14 +296,14 @@ export function Onboarding() {
           <form className="ob-view" key="email" onSubmit={(e) => { e.preventDefault(); if (email.includes("@")) sendCode(); }}>
             <span className="ob-label">Create your account</span>
             <h2 ref={headingRef} tabIndex={-1}>What&apos;s your <em>email</em>?</h2>
-            <p>We&apos;ll send a six-digit code. No password to remember.</p>
+            <p>We&apos;ll email you a sign-in link. No password to remember.</p>
             <div className="ob-field">
               <label className="ob-label" htmlFor="ob-email">Email</label>
               <input className="ob-input" id="ob-email" type="email" autoComplete="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus />
             </div>
             <Err />
             <div className="ob-grow" />
-            <div className="ob-actions"><button className="ob-btn" type="submit" disabled={!email.includes("@") || busy}>{busy ? "Sending…" : "Send code"}</button></div>
+            <div className="ob-actions"><button className="ob-btn" type="submit" disabled={!email.includes("@") || busy}>{busy ? "Sending…" : "Send link"}</button></div>
           </form>
         )}
 
@@ -311,13 +311,13 @@ export function Onboarding() {
           <form className="ob-view" key="code" onSubmit={(e) => { e.preventDefault(); if (code.length === 6) verify(); }}>
             <span className="ob-label">Create your account</span>
             <h2 ref={headingRef} tabIndex={-1}>Check your <em>inbox</em>.</h2>
-            <p>We sent a code to {email}. You can also tap the link in that email.</p>
+            <p>We sent a sign-in link to {email}. Tap it on this device and you&apos;ll come right back here. Got a six-digit code instead? Enter it below.</p>
             <label className="ob-code">
               <span className="sr-only">Six-digit code</span>
               <input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} autoFocus />
               {Array.from({ length: 6 }, (_, i) => <span key={i} className={i === code.length ? "cur" : ""}>{code[i] ?? ""}</span>)}
             </label>
-            <button type="button" className="ob-btn text left" disabled={busy} onClick={() => { setCode(""); sendCode(); }}>Resend code</button>
+            <button type="button" className="ob-btn text left" disabled={busy} onClick={() => { setCode(""); sendCode(); }}>Resend email</button>
             <Err />
             <div className="ob-grow" />
             <div className="ob-actions"><button className="ob-btn" type="submit" disabled={code.length !== 6 || busy}>{busy ? "Checking…" : "Verify"}</button></div>
