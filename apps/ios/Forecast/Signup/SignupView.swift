@@ -144,7 +144,7 @@ struct SignupView: View {
         busy = true
         error = nil
         Task {
-            do { try await work() } catch { self.error = error.localizedDescription }
+            do { try await work() } catch is CancellationError {} catch { self.error = error.localizedDescription }
             busy = false
         }
     }
@@ -234,9 +234,9 @@ struct SignupView: View {
                 .font(Typography.sans(15)).foregroundStyle(.white.opacity(0.76))
             ErrorLine(error: error)
             VStack(spacing: 10) {
-                // Sign in with Apple and Google need their providers switched on in Supabase first.
-                SignupButton(title: "Continue with Apple", icon: "apple.logo") { error = "Apple sign-in isn't switched on yet. Use email for now." }
-                SignupButton(title: "Continue with Google", icon: "g.circle", style: .ghost) { error = "Google sign-in isn't switched on yet. Use email for now." }
+                // Both report "isn't switched on yet" until their Supabase provider is set up.
+                SignupButton(title: "Continue with Apple", icon: "apple.logo") { attempt { try await SocialSignIn.apple() } }.disabled(busy)
+                SignupButton(title: "Continue with Google", icon: "g.circle", style: .ghost) { attempt { try await SocialSignIn.google() } }.disabled(busy)
                 SignupButton(title: "Use email instead", style: .text) { go(.email) }
             }
             Text("Already have an account? The same buttons sign you in.")
