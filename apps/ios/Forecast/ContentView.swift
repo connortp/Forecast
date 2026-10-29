@@ -55,7 +55,12 @@ struct ContentView: View {
                 }
                 #if DEBUG
                 // `-openDetails YES` as a launch argument starts scrolled to the cards, for screenshots.
-                .onAppear { if UserDefaults.standard.bool(forKey: "openDetails") { proxy.scrollTo("details", anchor: .top) } }
+                // Waits a beat: on first appear the scroll view hasn't laid out its content, so scrollTo is a no-op.
+                .task {
+                    guard UserDefaults.standard.bool(forKey: "openDetails") else { return }
+                    try? await Task.sleep(for: .milliseconds(400))
+                    proxy.scrollTo("details", anchor: .top)
+                }
                 #endif
             }
             .scrollIndicators(.hidden)
