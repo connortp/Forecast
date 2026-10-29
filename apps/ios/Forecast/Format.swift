@@ -29,5 +29,6 @@ enum Fmt {
     static func dayOfMonth(_ d: Int) -> String { at(d).formatted(.dateTime.day()) }
 
     static func shortDate(_ d: Int) -> String { at(d).formatted(.dateTime.month(.abbreviated).day()) }
+    static func weekday(_ d: Int) -> String { at(d).formatted(.dateTime.weekday(.wide)) }
     static func longDate(_ d: Int) -> String { at(d).formatted(.dateTime.weekday(.wide).month(.wide).day()) }
 }

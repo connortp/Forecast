@@ -19,13 +19,15 @@ enum TimeOfDay: String, CaseIterable {
 struct SkyView: View {
     var condition: Condition
     var timeOfDay: TimeOfDay
+    /// Past the hero the sky blurs and darkens behind the cards, as it does behind sign-up.
+    var dim = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
             if let sky = SkyAssets.shared?.resolve(condition, timeOfDay) {
-                Plate(sky: sky, animate: !reduceMotion)
+                Plate(sky: sky, animate: !reduceMotion, dim: dim)
             } else {
                 TimelineView(.animation(paused: reduceMotion)) { context in
                     let t = context.date.timeIntervalSinceReferenceDate
@@ -41,12 +43,16 @@ struct SkyView: View {
                 RainView(heavy: condition == .storm, night: timeOfDay == .night)
             }
             if condition == .storm && !reduceMotion { LightningView() }
-            LinearGradient(colors: [.clear, Palette.sheet.opacity(0.35)], startPoint: .init(x: 0.5, y: 0.65), endPoint: .bottom)
+            // The same shade as the web: a little darker at the top for the status bar, most at the bottom.
+            LinearGradient(stops: [.init(color: Palette.shade.opacity(0.35), location: 0), .init(color: Palette.shade.opacity(0.08), location: 0.4),
+                                   .init(color: Palette.shade.opacity(0.5), location: 1)], startPoint: .top, endPoint: .bottom)
             Grain().opacity(0.07).blendMode(.overlay)
+            Palette.shade.opacity(dim ? 0.35 : 0)
         }
         .ignoresSafeArea()
         .animation(.easeInOut(duration: 1.2), value: condition)
         .animation(.easeInOut(duration: 1.2), value: timeOfDay)
+        .animation(.easeInOut(duration: 0.9), value: dim)
     }
 
     // MARK: Fallback sky
@@ -146,23 +152,72 @@ struct SkyView: View {
 private struct Plate: View {
     var sky: SkyAssets.Resolved
     var animate: Bool
+    var dim: Bool
 
     var body: some View {
+        let hero = animate && sky.video != nil ? sky.videoHero : sky.hero
         GeometryReader { geo in
             ZStack {
                 if let image = UIImage(contentsOfFile: sky.plate.path) {
-                    Image(uiImage: image).resizable().scaledToFill()
+                    Framed(aspect: image.size.width / image.size.height, hero: sky.hero, size: geo.size) {
+                        Image(uiImage: image).resizable()
+                    }
+                    .colorMultiply(Color(white: sky.hero.exposure ?? 1))
                 }
                 if animate, let video = sky.video {
-                    LoopingVideo(url: video)
+                    Framed(aspect: 16 / 9, hero: sky.videoHero, size: geo.size) { LoopingVideo(url: video) }
+                        .colorMultiply(Color(white: sky.videoHero.exposure ?? 1))
                 }
                 Color.black.opacity(1 - sky.brightness)
             }
             .frame(width: geo.size.width, height: geo.size.height)
+            .blur(radius: dim ? 22 : 0)
+            .scaleEffect(dim ? 1.12 : 1)
             .clipped()
+            HeroScrim(strength: dim ? 0 : hero.scrim ?? 0, wide: geo.size.width > geo.size.height)
         }
         .id(sky.plate) // crossfade between plates instead of morphing
         .transition(.opacity)
+    }
+}
+
+/// Fills `size` with content of the given aspect, the way CSS `cover` does, zoomed and framed on
+/// the plate's focus point so the bright parts of the photo sit clear of the number.
+private struct Framed<Content: View>: View {
+    var aspect: CGFloat
+    var hero: SkyAssets.Hero
+    var size: CGSize
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        let (focus, zoom) = hero.framing(for: size)
+        let scale = max(size.width / aspect, size.height) * zoom
+        let w = scale * aspect, h = scale
+        content
+            .frame(width: w, height: h)
+            .offset(x: -(w - size.width) * focus.x, y: -(h - size.height) * focus.y)
+            .frame(width: size.width, height: size.height, alignment: .topLeading)
+    }
+}
+
+/// A soft dark ellipse behind the number. Same stops as the web's `.sky .scrim`, which is what
+/// hero-contrast.py measures, so the number keeps at least 3.6:1 on every plate.
+private struct HeroScrim: View {
+    var strength: Double
+    var wide: Bool
+
+    var body: some View {
+        GeometryReader { geo in
+            let rx = geo.size.width * (wide ? 0.42 : 0.85), ry = geo.size.height * (wide ? 0.36 : 0.19)
+            EllipticalGradient(stops: [.init(color: Palette.shade, location: 0), .init(color: Palette.shade.opacity(0.85), location: 0.35),
+                                       .init(color: Palette.shade.opacity(0.45), location: 0.65), .init(color: Palette.shade.opacity(0), location: 1)],
+                               center: .center, startRadiusFraction: 0, endRadiusFraction: 0.5)
+                .frame(width: rx * 2, height: ry * 2)
+                .position(x: geo.size.width / 2, y: geo.size.height / 2)
+        }
+        .opacity(strength)
+        .allowsHitTesting(false)
+        .animation(.easeInOut(duration: 1.2), value: strength)
     }
 }
 

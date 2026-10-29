@@ -31,14 +31,28 @@ button { font: inherit; color: inherit; }
 
 /* ---------- sky ---------- */
 .sky { position: fixed; inset: 0; z-index: -1; overflow: hidden; background: #0d1018; transition: filter 1.2s ease; }
+/* Each plate is framed for the number (focus, zoom; index.json "hero"), with a wide framing for
+   landscape windows, then drifts very slowly. */
 .sky .plate {
-  position: absolute; inset: -4%; background-size: cover; background-position: center;
+  --fx: 50%; --fy: 50%; --z: 1; --ax: var(--fx); --ay: var(--fy); --az: var(--z);
+  position: absolute; inset: -4%; background-size: cover; background-position: var(--ax) var(--ay);
+  transform-origin: var(--ax) var(--ay);
   opacity: 0; transition: opacity 1.4s ease; animation: drift 70s ease-in-out infinite alternate;
 }
-.sky video.plate { width: 108%; height: 108%; object-fit: cover; }
+@media (orientation: landscape) { .sky .plate { --ax: var(--wfx, var(--fx)); --ay: var(--wfy, var(--fy)); --az: var(--wz, var(--z)); } }
+.sky video.plate { width: 108%; height: 108%; object-fit: cover; object-position: var(--ax) var(--ay); }
 .sky .plate.on { opacity: 1; }
-@keyframes drift { from { transform: scale(1.02) translate(0, 0); } to { transform: scale(1.08) translate(-2%, 1.2%); } }
+@keyframes drift { from { transform: scale(calc(var(--az) * 1.02)) translate(0, 0); } to { transform: scale(calc(var(--az) * 1.06)) translate(-1.2%, .8%); } }
 .sky .shade { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, rgba(8,10,22,.35), rgba(8,10,22,.08) 40%, rgba(8,10,22,.5)); }
+/* A soft dark ellipse behind the number. Its strength per plate comes from hero-contrast.py,
+   which models these same stops, so the number keeps at least 3.6:1 against the brightest sky. */
+.sky .scrim {
+  position: absolute; inset: 0; pointer-events: none; transition: opacity 1.4s ease;
+  background: radial-gradient(ellipse 85% 19% at 50% 50%, rgb(8,10,22) 0%, rgba(8,10,22,.85) 35%, rgba(8,10,22,.45) 65%, rgba(8,10,22,0) 100%);
+}
+@media (orientation: landscape) {
+  .sky .scrim { background: radial-gradient(ellipse 42% 36% at 50% 50%, rgb(8,10,22) 0%, rgba(8,10,22,.85) 35%, rgba(8,10,22,.45) 65%, rgba(8,10,22,0) 100%); }
+}
 .sky canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .sky .flash { position: absolute; inset: 0; background: #dfe8ff; opacity: 0; pointer-events: none; }
 .sky.dim { filter: blur(18px) brightness(.55) saturate(.9); }
@@ -55,9 +69,9 @@ button { font: inherit; color: inherit; }
 
 .hero {
   min-height: 100svh; display: grid; align-content: center; justify-items: center; gap: 12px; text-align: center;
-  position: relative; text-shadow: 0 2px 28px rgba(0,0,0,.25);
+  position: relative; text-shadow: 0 1px 2px rgba(8,10,22,.18), 0 2px 30px rgba(8,10,22,.32);
 }
-.hero .label { color: rgba(255,255,255,.86); }
+.hero .label { color: rgba(255,255,255,.92); text-shadow: 0 1px 10px rgba(8,10,22,.5); }
 .num { margin-block: 6px; font: 300 clamp(7rem, 4rem + 16vw, 13rem)/.9 var(--serif); letter-spacing: -.035em; font-variant-numeric: tabular-nums; color: #fff; }
 .num .c { font-size: .44em; vertical-align: .9em; margin-right: .02em; letter-spacing: 0; }
 .more { position: absolute; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); left: 50%; margin-left: -20px; width: 40px; height: 40px; display: grid; place-items: center; color: rgba(255,255,255,.8); animation: bob 2.6s ease-in-out infinite; }
@@ -66,23 +80,15 @@ button { font: inherit; color: inherit; }
 
 /* ---------- glass cards ---------- */
 .sheet { width: min(100%, 560px); margin-inline: auto; padding-block: 8px 40px; display: grid; gap: 14px; scroll-margin-top: 16px; }
+@media (min-width: 1100px) { .sheet { width: min(100%, 600px); } }
 .glass { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); border-radius: 20px; backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
 .card { padding: 22px 20px; display: grid; gap: 14px; }
 .eyebrow { color: rgba(255,255,255,.62); }
 .card h2 { font: 300 clamp(30px, 26px + 1vw, 36px)/1.06 var(--serif); letter-spacing: -.015em; margin: 0; text-wrap: balance; }
 .card h2 em { font-style: italic; }
 .card p { margin: 0; color: var(--soft); font-size: 14.5px; }
-.card .quip { font: 400 18px/1.35 var(--serif); color: rgba(255,255,255,.9); }
 .fine { font-size: 12.5px !important; color: var(--faint) !important; margin: 0; }
 .foot { text-align: center; padding-top: 6px; }
-
-.days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
-.days span { display: grid; gap: 4px; justify-items: center; padding: 9px 0 8px; border-radius: 10px; background: rgba(255,255,255,.06); font-size: 12.5px; font-variant-numeric: tabular-nums; min-width: 0; }
-.days span i { font: 400 9px/1 var(--mono); font-style: normal; letter-spacing: .08em; text-transform: uppercase; color: rgba(255,255,255,.55); }
-.days span.now { background: rgba(255,255,255,.16); }
-.days span.pay { background: rgba(91,143,214,.6); }
-.days span.pay i { color: rgba(255,255,255,.8); }
-.days span.short { color: #ffb2a3; }
 
 .kv { display: grid; }
 .kv div { display: flex; justify-content: space-between; gap: 12px; padding: 11px 0; border-top: 1px solid rgba(255,255,255,.1); font-size: 14px; font-variant-numeric: tabular-nums; }
@@ -107,5 +113,72 @@ button { font: inherit; color: inherit; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { border: 1px solid rgba(255,255,255,.2); background: rgba(255,255,255,.06); border-radius: 99px; padding: 8px 12px; font-size: 12.5px; cursor: pointer; }
 .chip[aria-pressed="true"] { background: #fff; color: #0a0a0b; border-color: #fff; }
+
+/* ---------- drawn cards (Details.tsx) ---------- */
+.dt-intro { display: grid; gap: 16px; padding: 28px 4px 10px; }
+.dt-quip { margin: 0; font: 300 clamp(34px, 28px + 2vw, 44px)/1.04 var(--serif); letter-spacing: -.02em; text-wrap: balance; }
+.dt-quip em { font-style: italic; }
+.dt-readings { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 16px 0; }
+.dt-readings div { display: grid; gap: 8px; padding: 0 16px; border-left: 1px solid rgba(255,255,255,.12); min-width: 0; }
+.dt-readings div:first-child { border-left: 0; }
+.dt-readings .label { font-size: 10px; color: rgba(255,255,255,.58); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dt-readings b { font: 300 24px/1 var(--serif); letter-spacing: -.01em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.dt-arc, .dt-chart { width: 100%; height: auto; display: block; overflow: visible; }
+.dt-horizon { stroke: rgba(255,255,255,.16); stroke-width: 1; }
+.dt-track { fill: none; stroke: rgba(255,255,255,.28); stroke-width: 1.2; stroke-dasharray: 2 5; stroke-linecap: round; }
+.dt-done { fill: none; stroke: rgba(255,255,255,.85); stroke-width: 1.6; stroke-linecap: round; }
+.dt-mark { fill: #15161c; stroke: rgba(255,255,255,.8); stroke-width: 1.4; }
+.dt-mark.pay { fill: var(--pay); stroke: #cfe0ff; }
+.dt-sun { fill: #fff3d1; }
+.dt-ends { display: flex; justify-content: space-between; margin-top: -6px; font: 500 10px/1.5 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: rgba(255,255,255,.55); }
+.dt-ends span:last-child { text-align: right; }
+.dot { display: inline-block; width: 7px; height: 7px; border-radius: 99px; border: 1.3px solid rgba(255,255,255,.8); margin-right: 10px; vertical-align: 1px; }
+.dot.pay { background: var(--pay); border-color: #cfe0ff; }
+.row .nm small { padding-left: 17px; }
+
+.dt-typical { stroke: rgba(255,255,255,.35); stroke-width: 1; stroke-dasharray: 3 4; }
+.dt-pay { stroke: rgba(143,180,240,.55); stroke-width: 1; }
+.dt-tag { font: 500 8.5px var(--mono); letter-spacing: .12em; fill: rgba(255,255,255,.55); }
+.dt-tag.pay { fill: #b9cff5; }
+.dt-line { fill: none; stroke: #fff; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.dt-now { fill: #fff3d1; stroke: rgba(255,198,92,.45); stroke-width: 6; }
+.dt-day { font: 500 9px var(--mono); letter-spacing: .1em; text-transform: uppercase; fill: rgba(255,255,255,.55); }
+.dt-day.now { fill: #fff; }
+.dt-scale { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; color: rgba(255,255,255,.6); border-top: 1px solid rgba(255,255,255,.1); padding-top: 12px; }
+.dt-scale b { display: block; font: 300 22px/1.1 var(--serif); color: #fff; font-variant-numeric: tabular-nums; }
+
+.dt-split { position: relative; display: flex; gap: 3px; height: 14px; }
+.dt-split .seg { display: block; border-radius: 4px; min-width: 3px; }
+.seg.bills, .sw.bills { background: rgba(255,255,255,.88); }
+.seg.savings, .sw.savings { background: #8fb4f0; }
+.seg.cushion, .sw.cushion { background: rgba(255,255,255,.34); }
+.seg.later, .sw.later { background: rgba(255,255,255,.14); }
+.seg.today, .sw.today { background: #ffc65c; }
+.dt-cashline { position: absolute; top: -5px; bottom: -5px; width: 2px; margin-left: -1px; background: #ff9a85; border-radius: 2px; }
+.sw { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 10px; vertical-align: 0; }
+
+.dt-rings { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.dt-rings figure { margin: 0; display: grid; gap: 10px; justify-items: center; text-align: center; font-size: 13px; min-width: 0; }
+.dt-rings svg { width: min(100%, 92px); }
+.ring-track { fill: none; stroke: rgba(255,255,255,.1); stroke-width: 5; }
+.ring { fill: none; stroke: #fff; stroke-width: 5; stroke-linecap: round; }
+.ring.c0 { stroke: #a8e6c0; } .ring.c1 { stroke: #ffc9a6; } .ring.c2 { stroke: #a9c8ff; } .ring.c3 { stroke: #e4c4ff; }
+.ring-pct { font: 300 19px var(--serif); fill: #fff; }
+.dt-rings figcaption span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dt-rings small { display: block; color: rgba(255,255,255,.55); font-size: 11.5px; margin-top: 2px; }
+
+.dt-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.tile { gap: 10px; align-content: start; }
+.dt-dial { width: 100%; max-width: 150px; height: auto; display: block; margin: 2px auto 0; overflow: visible; }
+.dial-track { fill: none; stroke: rgba(255,255,255,.16); stroke-width: 5; stroke-linecap: round; }
+.dial-safe { stroke: #ffc65c; stroke-width: 2.2; stroke-linecap: round; }
+.dial-needle { stroke: #fff; stroke-width: 1.8; stroke-linecap: round; }
+.dial-needle.over { stroke: #ffb2a3; }
+.dial-hub { fill: #fff; }
+.umbrella { fill: rgba(255,255,255,.1); stroke: rgba(255,255,255,.85); stroke-width: 1.4; stroke-linejoin: round; }
+.umbrella-stem { fill: none; stroke: rgba(255,255,255,.85); stroke-width: 1.4; stroke-linecap: round; }
+.tile-num { font: 300 34px/1 var(--serif); letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.tile-num small { font: 400 13px var(--sans); color: rgba(255,255,255,.6); margin-left: 3px; letter-spacing: 0; }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }

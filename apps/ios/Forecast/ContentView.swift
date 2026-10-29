@@ -12,6 +12,7 @@ struct ContentView: View {
     @AppStorage("scenario") private var scenario: Scenario = .partly
     @AppStorage("tone") private var tone: Tone = .spicy
     @AppStorage("time") private var timeSetting = "auto"
+    @State private var pastHero = false
 
     private var timeOfDay: TimeOfDay { TimeOfDay(rawValue: timeSetting) ?? .now }
 
@@ -34,7 +35,7 @@ struct ContentView: View {
         let t = today(s)
 
         return ZStack {
-            SkyView(condition: t.condition, timeOfDay: timeOfDay)
+            SkyView(condition: t.condition, timeOfDay: timeOfDay, dim: pastHero)
 
             ScrollViewReader { proxy in
                 ScrollView {
@@ -54,11 +55,28 @@ struct ContentView: View {
                 }
                 #if DEBUG
                 // `-openDetails YES` as a launch argument starts scrolled to the cards, for screenshots.
-                .onAppear { if UserDefaults.standard.bool(forKey: "openDetails") { proxy.scrollTo("details", anchor: .top) } }
+                // Waits a beat: on first appear the scroll view hasn't laid out its content, so scrollTo is a no-op.
+                .task {
+                    guard UserDefaults.standard.bool(forKey: "openDetails") else { return }
+                    try? await Task.sleep(for: .milliseconds(400))
+                    proxy.scrollTo("details", anchor: .top)
+                }
                 #endif
             }
             .scrollIndicators(.hidden)
             .ignoresSafeArea(edges: .bottom)
+            // Cards fade out just below the status bar instead of sliding under the clock, as in Weather.
+            .mask {
+                VStack(spacing: 0) {
+                    LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 28)
+                    Color.black
+                }
+                .ignoresSafeArea(edges: .bottom)
+            }
+            // Past the hero the sky softens behind the cards, like the sign-up flow.
+            .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y > $0.containerSize.height * 0.35 } action: { _, past in
+                pastHero = past
+            }
             .refreshable {
                 if case .live(_, let session) = source { await session.refresh() }
             }
@@ -89,10 +107,11 @@ private struct Hero: View {
             .foregroundStyle(.white)
             .lineLimit(1)
             .minimumScaleFactor(0.5)
-            Eyebrow(text: "Safe to spend", color: .white.opacity(0.8))
+            Eyebrow(text: "Safe to spend", color: .white.opacity(0.92))
                 .padding(.top, 4)
         }
-        .shadow(color: .black.opacity(0.16), radius: 20, y: 2)
+        .shadow(color: Palette.shade.opacity(0.18), radius: 1, y: 1)
+        .shadow(color: Palette.shade.opacity(0.32), radius: 15, y: 2)
         .padding(.horizontal, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay(alignment: .bottom) { ScrollHint() }
