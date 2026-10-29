@@ -7,3 +7,8 @@ export const ForecastAppClient = dynamic(() => import("./ForecastApp").then((m) 
   ssr: false,
   loading: () => <div className="app" />,
 });
+
+export const ImportPreviewClient = dynamic(() => import("./ImportPreview").then((m) => m.ImportPreview), {
+  ssr: false,
+  loading: () => <div className="app" />,
+});
