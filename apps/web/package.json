@@ -10,9 +10,11 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@supabase/supabase-js": "2.49.4",
     "next": "15.1.6",
     "react": "19.0.0",
-    "react-dom": "19.0.0"
+    "react-dom": "19.0.0",
+    "react-plaid-link": "3.6.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",

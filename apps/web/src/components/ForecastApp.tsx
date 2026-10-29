@@ -6,6 +6,8 @@ import { CONDITION_NAME, QUIPS, type Tone } from "@/lib/copy";
 import { dayName, heroDate, longDate, money, shortDate } from "@/lib/format";
 import { SCENARIOS, type ScenarioKey } from "@/lib/sample-data";
 import { Sky, type TimeOfDay } from "./Sky";
+import type { Live } from "./onboarding/Gate";
+import { PLAID_SANDBOX } from "@/lib/supabase";
 
 type TimeSetting = TimeOfDay | "auto";
 type Prefs = { scenario: ScenarioKey; tone: Tone; time: TimeSetting };
@@ -39,9 +41,10 @@ function Chips<K extends string>({ label, items, value, onPick }: { label: strin
   );
 }
 
-export function ForecastApp() {
+export function ForecastApp({ live }: { live: Live | null }) {
   const [prefs, setPrefs] = useState<Prefs>({ scenario: "partly", tone: "spicy", time: "auto" });
   const [scrolled, setScrolled] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     try {
@@ -65,7 +68,7 @@ export function ForecastApp() {
       return next;
     });
 
-  const s = SCENARIOS[prefs.scenario].snapshot;
+  const s = live?.snapshot ?? SCENARIOS[prefs.scenario].snapshot;
   const t = today(s);
   const days = outlook(s, 7);
   const tod = prefs.time === "auto" ? currentTimeOfDay() : prefs.time;
@@ -87,7 +90,7 @@ export function ForecastApp() {
 
       <header className="top">
         <span className="brand"><Mark />Forecast</span>
-        <span className="label pill">Example data</span>
+        {(!live || PLAID_SANDBOX) && <span className="label pill">{live ? "Sandbox bank" : "Example data"}</span>}
       </header>
 
       <section className="hero" aria-live="polite">
@@ -145,7 +148,7 @@ export function ForecastApp() {
               <div className="bucket" key={b.name}>
                 <span className="nm">{b.name}<small>+{money(b.perPaycheck)} each paycheck</small></span>
                 <span className="amt">{money(b.saved)}<small>of {money(b.goal)}</small></span>
-                <div className="bar"><i style={{ width: `${(b.saved / b.goal) * 100}%` }} /></div>
+                <div className="bar"><i style={{ width: `${b.goal > 0 ? Math.min(100, (b.saved / b.goal) * 100) : 0}%` }} /></div>
               </div>
             ))}
           </div>
@@ -169,16 +172,28 @@ export function ForecastApp() {
         </section>
 
         <section className="glass card demo">
-          <span className="label eyebrow">Try other skies</span>
-          <Chips label="Example scenarios" value={prefs.scenario} onPick={(k) => update({ scenario: k })}
-            items={(Object.keys(SCENARIOS) as ScenarioKey[]).map((k) => [k, SCENARIOS[k].label])} />
+          <span className="label eyebrow">{live ? "Settings" : "Try other skies"}</span>
+          {!live && (
+            <Chips label="Example scenarios" value={prefs.scenario} onPick={(k) => update({ scenario: k })}
+              items={(Object.keys(SCENARIOS) as ScenarioKey[]).map((k) => [k, SCENARIOS[k].label])} />
+          )}
           <Chips label="Time of day" value={prefs.time} onPick={(k) => update({ time: k })}
             items={[["auto", "Now"], ["dawn", "Dawn"], ["day", "Day"], ["dusk", "Dusk"], ["night", "Night"]]} />
           <Chips label="Voice" value={prefs.tone} onPick={(k) => update({ tone: k })}
             items={[["calm", "Calm voice"], ["spicy", "Spicy voice"]]} />
         </section>
 
-        <p className="fine foot">Prototype on example data. Nothing here is a real account.</p>
+        {live ? (
+          <div className="chips foot" role="group" aria-label="Account">
+            <button type="button" className="chip" disabled={refreshing}
+              onClick={async () => { setRefreshing(true); try { await live.refresh(); } finally { setRefreshing(false); } }}>
+              {refreshing ? "Refreshing…" : "Refresh from bank"}
+            </button>
+            <button type="button" className="chip" onClick={live.signOut}>Sign out</button>
+          </div>
+        ) : (
+          <p className="fine foot">Prototype on example data. Nothing here is a real account.</p>
+        )}
       </main>
     </div>
   );
