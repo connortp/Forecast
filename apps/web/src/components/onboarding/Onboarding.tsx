@@ -1,21 +1,27 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { usePlaidLink } from "react-plaid-link";
 import { today } from "@/lib/engine";
 import { heroDate, money, shortDate } from "@/lib/format";
-import { CADENCES, EXAMPLE, initialChoices, snapshotFrom, type Choices } from "./example";
-import { saveOnboarding, saveSnapshot, type Saved } from "./progress";
+import { EVERY, findBills, findPaycheck, localYmd, toSnapshot, type LiveRows } from "@/lib/live";
+import { call, loadRows, PLAID_SANDBOX, supabase } from "@/lib/supabase";
+import { CADENCES, EXAMPLE } from "./example";
+import { saveOnboarding, type Saved } from "./progress";
 import "./onboarding.css";
 
 type Step = "welcome" | "email" | "code" | "bank" | "reading" | "payday" | "bills" | "savings" | "reveal";
+type Rows = Awaited<ReturnType<typeof loadRows>>;
+type Exchange = { item_id: string; accounts: { name: string }[] };
 
 // Five stages on the progress bar; the welcome and the reveal sit outside it.
 const STAGE: Record<Step, number> = { welcome: -1, email: 0, code: 0, bank: 1, reading: 1, payday: 2, bills: 3, savings: 4, reveal: 5 };
-const READING = [`Balances from ${EXAMPLE.bank}`, `${EXAMPLE.transactions.toLocaleString("en-US")} transactions`, "Finding your paydays", "Finding your bills"];
+const FREQ = Object.fromEntries(Object.entries(EVERY).map(([k, v]) => [v, k]));
 
 const cents = (n: number) => "$" + n.toLocaleString("en-US", { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 });
 const reduceMotion = () => typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+const ymdIn = (days: number) => localYmd(undefined, new Date(Date.now() + days * 86_400_000));
 
 export function Onboarding() {
   const router = useRouter();
@@ -24,62 +30,221 @@ export function Onboarding() {
   const [method, setMethod] = useState<Saved["method"]>();
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
-  const [sheet, setSheet] = useState<"closed" | "banks" | "accounts">("closed");
-  const [accounts, setAccounts] = useState(EXAMPLE.accounts.map((a) => a.on));
-  const [readIdx, setReadIdx] = useState(0);
-  const [c, setC] = useState<Choices>(initialChoices);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [rows, setRows] = useState<Rows | null>(null);
+  const [bank, setBank] = useState("your bank");
+  const [linkToken, setLinkToken] = useState<string | null>(null);
+
+  // What the person confirms along the way.
+  const [every, setEvery] = useState(14);
+  const [payAmount, setPayAmount] = useState("");
+  const [payDate, setPayDate] = useState(() => ymdIn(7));
+  const [billsOff, setBillsOff] = useState<Set<string>>(new Set());
+  const [buckets, setBuckets] = useState(() => EXAMPLE.buckets.map((b) => ({ ...b })));
+  const [cushion, setCushion] = useState(150);
   const headingRef = useRef<HTMLHeadingElement>(null);
 
-  const t = useMemo(() => today(snapshotFrom(c)), [c]);
-  const safe = Math.round(t.safeToSpend);
+  const ymd = rows ? localYmd(rows.timezone) : localYmd();
+  const found = rows ? findPaycheck({ streams: rows.streams, settings: null }, ymd) : null;
+  const bills = useMemo(() => (rows ? findBills(rows.streams.map((s) => ({ ...s, ignored: false })), ymd) : []), [rows, ymd]);
 
-  const go = (next: Step) => {
+  // The rows as the person has confirmed them so far, for the live number.
+  const confirmed = useMemo((): LiveRows | null => {
+    if (!rows) return null;
+    const amount = found ? null : Number(payAmount) || null;
+    return {
+      ...rows,
+      streams: rows.streams.map((s) => ({ ...s, ignored: billsOff.has(s.id) })),
+      buckets: buckets.map((b) => ({ name: b.name, goal: b.goal, saved: 0, per_paycheck: b.perPaycheck, archived_at: null })),
+      settings: {
+        cushion,
+        pay_amount_override: amount,
+        next_payday_override: found ? null : payDate,
+        pay_every_days_override: found && every === found.every ? null : every,
+      },
+    };
+  }, [rows, found, payAmount, payDate, billsOff, buckets, cushion, every]);
+  const snapshot = confirmed ? toSnapshot(confirmed, ymd) : null;
+  const t = snapshot ? today(snapshot) : null;
+
+  const go = useCallback((next: Step) => {
+    setError("");
     setTrail((tr) => [...tr, step]);
     setStep(next);
-  };
+  }, [step]);
   const back = () => {
     const prev = trail[trail.length - 1];
     if (!prev) return;
     setTrail(trail.slice(0, -1));
     setStep(prev === "reading" ? "bank" : prev);
   };
+  const attempt = async (fn: () => Promise<void>) => {
+    setBusy(true);
+    setError("");
+    try {
+      await fn();
+    } catch (e) {
+      setError((e as Error).message || "Something went wrong. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Coming back from Google, Apple or an email link: pick up where they are.
+  useEffect(() => {
+    const resume = async (signedIn: boolean) => {
+      if (!signedIn) return;
+      const r = await loadRows().catch(() => null);
+      if (r?.onboarded) return router.replace("/");
+      setRows(r);
+      setStep(r?.hasBank ? "reading" : "bank");
+    };
+    supabase().auth.getSession().then(({ data }) => resume(!!data.session));
+    const { data } = supabase().auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_IN") resume(true);
+    });
+    return () => data.subscription.unsubscribe();
+  }, [router]);
 
   // Move focus to each new screen's heading, except where a field takes it.
   useEffect(() => {
     if (step !== "email" && step !== "code") headingRef.current?.focus({ preventScroll: true });
   }, [step]);
 
-  // "Reading your sky": tick through the checks, then move on.
+  // "Reading your sky": wait for Plaid's history to land (the webhook fills it in).
   useEffect(() => {
     if (step !== "reading") return;
-    setReadIdx(0);
-    const ms = reduceMotion() ? 350 : 750;
-    const timers = READING.map((_, i) => setTimeout(() => setReadIdx(i + 1), ms * (i + 1)));
-    timers.push(setTimeout(() => go("payday"), ms * (READING.length + 1)));
-    return () => timers.forEach(clearTimeout);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step]);
+    let stop = false;
+    const started = Date.now();
+    const poll = async () => {
+      const r = await loadRows().catch(() => null);
+      if (stop) return;
+      if (r) setRows(r);
+      const ready = r && r.transactions.length > 0 && r.streams.length > 0;
+      if (ready || Date.now() - started > 45_000) {
+        if (r) {
+          const p = findPaycheck({ streams: r.streams, settings: null }, localYmd(r.timezone));
+          if (p) setEvery(p.every);
+        }
+        setTimeout(() => !stop && go("payday"), reduceMotion() ? 200 : 900);
+      } else setTimeout(poll, 2000);
+    };
+    poll();
+    return () => {
+      stop = true;
+    };
+  }, [step, go]);
 
   const signIn = (m: NonNullable<Saved["method"]>) => {
     setMethod(m);
-    // Apple and Google create the account in one tap; email goes through a code.
-    go(m === "email" ? "email" : "bank");
+    if (m === "email") return go("email");
+    attempt(async () => {
+      const { error } = await supabase().auth.signInWithOAuth({ provider: m, options: { redirectTo: `${location.origin}/welcome` } });
+      if (error) throw new Error(`${m === "google" ? "Google" : "Apple"} sign-in isn't switched on yet. Use email for now.`);
+    });
   };
 
-  const finish = () => {
-    saveSnapshot(snapshotFrom(c));
-    saveOnboarding({ done: true, method });
-    router.push("/");
+  const sendCode = () =>
+    attempt(async () => {
+      const { error } = await supabase().auth.signInWithOtp({ email, options: { emailRedirectTo: `${location.origin}/welcome` } });
+      if (error) throw error;
+      go("code");
+    });
+
+  const verify = () =>
+    attempt(async () => {
+      const { error } = await supabase().auth.verifyOtp({ email, token: code, type: "email" });
+      if (error) throw new Error("That code didn't work. Check it, or send a new one.");
+      // onAuthStateChange moves on to the bank step.
+    });
+
+  const linked = (_res: Exchange, name?: string) => {
+    setBank(name ?? "your bank");
+    go("reading");
   };
+
+  const plaid = usePlaidLink({
+    token: linkToken,
+    onSuccess: (public_token, meta) =>
+      attempt(async () => {
+        const institution = meta.institution ? { institution_id: meta.institution.institution_id, name: meta.institution.name } : null;
+        await linked(await call<Exchange>("exchange-public-token", { public_token, institution }), meta.institution?.name);
+      }),
+    onExit: (err) => {
+      setLinkToken(null);
+      if (err) setError(err.display_message ?? "The bank connection closed before it finished.");
+    },
+  });
+  useEffect(() => {
+    if (linkToken && plaid.ready) plaid.open();
+  }, [linkToken, plaid.ready, plaid]);
+
+  const connect = () =>
+    attempt(async () => {
+      setLinkToken((await call<{ link_token: string }>("create-link-token")).link_token);
+    });
+
+  const testBank = () =>
+    attempt(async () => {
+      const sandbox = await call<{ public_token: string; institution: { name: string } }>("sandbox-public-token");
+      await linked(await call<Exchange>("exchange-public-token", sandbox), "a test bank");
+    });
+
+  const savePayday = () =>
+    attempt(async () => {
+      if (!found && !(Number(payAmount) > 0)) throw new Error("Add your paycheck amount.");
+      go("bills");
+    });
+
+  const saveAll = (list = buckets) =>
+    attempt(async () => {
+      const db = supabase();
+      const { data: user } = await db.auth.getUser();
+      const uid = user.user!.id;
+      const writes = [
+        db.from("settings").update({ ...confirmed!.settings!, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }).eq("user_id", uid),
+        ...rows!.streams.filter((x) => x.direction === "outflow").map((x) => db.from("recurring_streams").update({ ignored: billsOff.has(x.id) }).eq("id", x.id)),
+      ];
+      const { data: existing } = await db.from("buckets").select("id").limit(1);
+      if (!existing?.length) {
+        const keep = list.filter((b) => b.perPaycheck > 0);
+        if (keep.length) writes.push(db.from("buckets").insert(keep.map((b, i) => ({ user_id: uid, name: b.name, goal: b.goal, per_paycheck: b.perPaycheck, sort: i }))));
+      }
+      setBuckets(list);
+      const results = await Promise.all(writes);
+      const failed = results.find((r) => r.error);
+      if (failed?.error) throw failed.error;
+      go("reveal");
+    });
+
+  const finish = () =>
+    attempt(async () => {
+      const db = supabase();
+      const { data: user } = await db.auth.getUser();
+      const { error } = await db.from("profiles").update({ onboarded_at: new Date().toISOString() }).eq("id", user.user!.id);
+      if (error) throw error;
+      saveOnboarding({ done: true, method });
+      router.push("/");
+    });
 
   const sky = step === "welcome" ? "video" : step === "reveal" ? "reveal" : "flow";
   const stage = STAGE[step];
   const chrome = stage >= 0 && stage < 5;
 
-  const heldBills = c.billsOn.filter(Boolean).length;
-  const billTotal = EXAMPLE.bills.reduce((n, b, i) => n + (c.billsOn[i] ? b.amount : 0), 0);
-  const cadence = CADENCES.find((x) => x.every === c.every) ?? CADENCES[1];
-  const paydays = Array.from({ length: 7 }, (_, i) => shortDate(EXAMPLE.paycheck.nextIn + i * c.every));
+  const heldBills = bills.filter((b) => !billsOff.has(b.id));
+  const billTotal = heldBills.reduce((n, b) => n + b.amount, 0);
+  const cadence = CADENCES.find((x) => x.every === every) ?? CADENCES[1];
+  const firstPay = snapshot?.paycheck.nextIn ?? found?.nextIn ?? 7;
+  const paydays = Array.from({ length: 7 }, (_, i) => shortDate(firstPay + i * every));
+  const reading = [
+    { label: rows?.accounts.length ? `Balances from ${bank}` : "Balances", done: !!rows?.accounts.length },
+    { label: rows?.transactions.length ? `${rows.transactions.length.toLocaleString("en-US")} transactions` : "Transactions", done: !!rows?.transactions.length },
+    { label: "Finding your paydays", done: !!rows?.streams.some((s) => s.direction === "inflow") },
+    { label: "Finding your bills", done: !!rows?.streams.some((s) => s.direction === "outflow") },
+  ];
+  const readIdx = reading.findIndex((r) => !r.done);
+  const Err = () => (error ? <p className="ob-err" role="alert">{error}</p> : null);
 
   return (
     <div className="ob">
@@ -100,7 +265,7 @@ export function Onboarding() {
 
       <div className="ob-col">
         <div className={`ob-top ${chrome ? "" : "off"}`}>
-          <button className="ob-back" onClick={back} disabled={step === "reading" || !trail.length} aria-label="Back">
+          <button className="ob-back" onClick={back} disabled={step === "reading" || step === "bank" || !trail.length} aria-label="Back">
             <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 2 4 7l5 5" /></svg>
           </button>
           <div className="ob-bars" role="progressbar" aria-valuemin={1} aria-valuemax={5} aria-valuenow={Math.max(1, stage + 1)} aria-label="Sign-up progress">
@@ -117,9 +282,10 @@ export function Onboarding() {
             <div className="ob-grow" />
             <h1 ref={headingRef} tabIndex={-1}>One number, <em>every</em> morning.</h1>
             <p>What you can safely spend today, after bills and savings, until your next paycheck.</p>
+            <Err />
             <div className="ob-actions">
-              <button className="ob-btn" onClick={() => signIn("google")}><GoogleMark />Continue with Google</button>
-              <button className="ob-btn ghost" onClick={() => signIn("apple")}><AppleMark />Continue with Apple</button>
+              <button className="ob-btn" disabled={busy} onClick={() => signIn("google")}><GoogleMark />Continue with Google</button>
+              <button className="ob-btn ghost" disabled={busy} onClick={() => signIn("apple")}><AppleMark />Continue with Apple</button>
               <button className="ob-btn text" onClick={() => signIn("email")}>Use email instead</button>
             </div>
             <p className="ob-fine">Already have an account? The same buttons sign you in.</p>
@@ -127,32 +293,34 @@ export function Onboarding() {
         )}
 
         {step === "email" && (
-          <form className="ob-view" key="email" onSubmit={(e) => { e.preventDefault(); if (email.includes("@")) go("code"); }}>
+          <form className="ob-view" key="email" onSubmit={(e) => { e.preventDefault(); if (email.includes("@")) sendCode(); }}>
             <span className="ob-label">Create your account</span>
             <h2 ref={headingRef} tabIndex={-1}>What&apos;s your <em>email</em>?</h2>
-            <p>We&apos;ll send a six-digit code. No password to remember.</p>
+            <p>We&apos;ll email you a sign-in link. No password to remember.</p>
             <div className="ob-field">
               <label className="ob-label" htmlFor="ob-email">Email</label>
               <input className="ob-input" id="ob-email" type="email" autoComplete="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus />
             </div>
+            <Err />
             <div className="ob-grow" />
-            <div className="ob-actions"><button className="ob-btn" type="submit" disabled={!email.includes("@")}>Send code</button></div>
+            <div className="ob-actions"><button className="ob-btn" type="submit" disabled={!email.includes("@") || busy}>{busy ? "Sending…" : "Send link"}</button></div>
           </form>
         )}
 
         {step === "code" && (
-          <form className="ob-view" key="code" onSubmit={(e) => { e.preventDefault(); if (code.length === 6) go("bank"); }}>
+          <form className="ob-view" key="code" onSubmit={(e) => { e.preventDefault(); if (code.length === 6) verify(); }}>
             <span className="ob-label">Create your account</span>
             <h2 ref={headingRef} tabIndex={-1}>Check your <em>inbox</em>.</h2>
-            <p>We sent a code to {email}. Any six digits work in this preview.</p>
+            <p>We sent a sign-in link to {email}. Tap it on this device and you&apos;ll come right back here. Got a six-digit code instead? Enter it below.</p>
             <label className="ob-code">
               <span className="sr-only">Six-digit code</span>
               <input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} autoFocus />
               {Array.from({ length: 6 }, (_, i) => <span key={i} className={i === code.length ? "cur" : ""}>{code[i] ?? ""}</span>)}
             </label>
-            <button type="button" className="ob-btn text left" onClick={() => setCode("")}>Resend code</button>
+            <button type="button" className="ob-btn text left" disabled={busy} onClick={() => { setCode(""); sendCode(); }}>Resend email</button>
+            <Err />
             <div className="ob-grow" />
-            <div className="ob-actions"><button className="ob-btn" type="submit" disabled={code.length !== 6}>Verify</button></div>
+            <div className="ob-actions"><button className="ob-btn" type="submit" disabled={code.length !== 6 || busy}>{busy ? "Checking…" : "Verify"}</button></div>
           </form>
         )}
 
@@ -166,8 +334,12 @@ export function Onboarding() {
               <div><CheckIcon /><span>You sign in with your bank through Plaid. We never see your bank password.</span></div>
               <div><ListIcon /><span>Disconnect any time in Settings, and your bank data is deleted.</span></div>
             </div>
+            <Err />
             <div className="ob-grow" />
-            <div className="ob-actions"><button className="ob-btn" onClick={() => setSheet("banks")}>Connect bank</button></div>
+            <div className="ob-actions">
+              <button className="ob-btn" disabled={busy} onClick={connect}>{busy ? "Connecting…" : "Connect bank"}</button>
+              {PLAID_SANDBOX && <button className="ob-btn text" disabled={busy} onClick={testBank}>Use a test bank</button>}
+            </div>
           </section>
         )}
 
@@ -176,51 +348,74 @@ export function Onboarding() {
             <span className="ob-label">Reading your sky</span>
             <h2 ref={headingRef} tabIndex={-1}>Looking at your last <em>90 days</em>.</h2>
             <div className="ob-steps">
-              {READING.map((r, i) => <div key={r} className={i < readIdx ? "done" : i === readIdx ? "run" : ""}><b />{r}</div>)}
+              {reading.map((r, i) => <div key={i} className={r.done ? "done" : i === readIdx ? "run" : ""}><b />{r.label}</div>)}
             </div>
-            <p className="ob-fine left">Usually under 30 seconds. You can close this; we&apos;ll email you when it&apos;s ready.</p>
+            <p className="ob-fine left">Usually under 30 seconds.</p>
           </section>
         )}
 
         {step === "payday" && (
           <section className="ob-view" key="payday">
             <span className="ob-label">Your paydays</span>
-            <h2 ref={headingRef} tabIndex={-1}>Looks like you&apos;re paid <em>{cadence.label}</em>.</h2>
-            <div className="ob-glass ob-card">
-              <span className="ob-label dim">{EXAMPLE.employer}</span>
-              <div className="ob-between"><span className="ob-big">{money(EXAMPLE.paycheck.amount)}</span><span className="ob-note">after tax</span></div>
-              <div className="ob-dates">
-                {paydays.map((d, i) => { const [m, day] = d.split(" "); return <span key={d} className={i === 0 ? "pay" : ""}><i>{m.toUpperCase()}</i>{day}</span>; })}
-              </div>
-            </div>
+            {found ? (
+              <>
+                <h2 ref={headingRef} tabIndex={-1}>Looks like you&apos;re paid <em>{cadence.label}</em>.</h2>
+                <div className="ob-glass ob-card">
+                  <span className="ob-label dim">{found.name}</span>
+                  <div className="ob-between"><span className="ob-big">{money(found.amount)}</span><span className="ob-note">after tax</span></div>
+                  <div className="ob-dates">
+                    {paydays.map((d, i) => { const [m, day] = d.split(" "); return <span key={d} className={i === 0 ? "pay" : ""}><i>{m.toUpperCase()}</i>{day}</span>; })}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <h2 ref={headingRef} tabIndex={-1}>When do you get <em>paid</em>?</h2>
+                <p>We couldn&apos;t spot a paycheck yet. Tell us and we&apos;ll learn it as deposits land.</p>
+                <div className="ob-field">
+                  <label className="ob-label" htmlFor="ob-pay">Each paycheck, after tax</label>
+                  <input className="ob-input" id="ob-pay" inputMode="decimal" placeholder="$2,000" value={payAmount} onChange={(e) => setPayAmount(e.target.value.replace(/[^\d.]/g, ""))} />
+                </div>
+                <div className="ob-field">
+                  <label className="ob-label" htmlFor="ob-next">Next payday</label>
+                  <input className="ob-input" id="ob-next" type="date" min={ymdIn(1)} value={payDate} onChange={(e) => setPayDate(e.target.value)} />
+                </div>
+              </>
+            )}
             <div className="ob-chips" role="radiogroup" aria-label="How often you're paid">
               {CADENCES.map((x) => (
-                <button key={x.every} role="radio" aria-checked={x.every === c.every} className={`ob-chip ${x.every === c.every ? "on" : ""}`} onClick={() => setC({ ...c, every: x.every })}>{x.chip}</button>
+                <button key={x.every} role="radio" aria-checked={x.every === every} className={`ob-chip ${x.every === every ? "on" : ""}`} onClick={() => setEvery(x.every)}>{x.chip}</button>
               ))}
             </div>
+            <Err />
             <div className="ob-grow" />
-            <div className="ob-actions"><button className="ob-btn" onClick={() => go("bills")}>That&apos;s right</button></div>
+            <div className="ob-actions"><button className="ob-btn" onClick={savePayday}>{found ? "That's right" : "Continue"}</button></div>
           </section>
         )}
 
         {step === "bills" && (
           <section className="ob-view" key="bills">
             <span className="ob-label">Your bills</span>
-            <h2 ref={headingRef} tabIndex={-1}>These come out <em>before</em> payday.</h2>
-            <p>Turn off anything that isn&apos;t a real bill.</p>
-            <div className="ob-glass ob-list">
-              {EXAMPLE.bills.map((b, i) => (
-                <div key={b.name} className={`ob-row ${c.billsOn[i] ? "" : "off"}`}>
-                  <span className="nm">{b.name}<small>{[shortDate(b.dueIn), b.payee].filter(Boolean).join(" · ")}</small></span>
-                  <span className="amt">{cents(b.amount)}</span>
-                  <button
-                    className="ob-tog" role="switch" aria-checked={c.billsOn[i]} aria-label={`Count ${b.name}`}
-                    onClick={() => setC({ ...c, billsOn: c.billsOn.map((v, j) => (j === i ? !v : v)) })}
-                  />
-                </div>
-              ))}
-            </div>
-            <div className="ob-between ob-total"><span className="ob-label dim">Held for bills</span><b>{cents(Math.round(billTotal * 100) / 100)}</b></div>
+            <h2 ref={headingRef} tabIndex={-1}>{bills.length ? <>These come out <em>regularly</em>.</> : <>No bills <em>yet</em>.</>}</h2>
+            <p>{bills.length ? "Turn off anything that isn't a real bill." : "We'll add them as they repeat. You can also add one later."}</p>
+            {bills.length > 0 && (
+              <div className="ob-glass ob-list">
+                {bills.map((b) => {
+                  const on = !billsOff.has(b.id);
+                  return (
+                    <div key={b.id} className={`ob-row ${on ? "" : "off"}`}>
+                      <span className="nm">{b.name}<small>{shortDate(b.dueIn)}{b.every !== 30 ? ` · every ${FREQ[b.every]?.toLowerCase().replace("_", "-") ?? `${b.every} days`}` : ""}</small></span>
+                      <span className="amt">{cents(b.amount)}</span>
+                      <button
+                        className="ob-tog" role="switch" aria-checked={on} aria-label={`Count ${b.name}`}
+                        onClick={() => setBillsOff((s) => { const n = new Set(s); if (on) n.add(b.id); else n.delete(b.id); return n; })}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <div className="ob-between ob-total"><span className="ob-label dim">Held for bills before payday</span><b>{cents(Math.round((t?.bills ?? 0) * 100) / 100)}</b></div>
             <div className="ob-grow" />
             <div className="ob-actions"><button className="ob-btn" onClick={() => go("savings")}>Looks right</button></div>
           </section>
@@ -230,75 +425,44 @@ export function Onboarding() {
           <section className="ob-view" key="savings">
             <span className="ob-label">Savings</span>
             <h2 ref={headingRef} tabIndex={-1}>Pay yourself <em>first</em>.</h2>
-            <p>Set aside from each paycheck before anything looks spendable. Starts with your {shortDate(EXAMPLE.paycheck.nextIn)} paycheck.</p>
+            <p>Set aside from each paycheck before anything looks spendable. Starts with your {shortDate(firstPay)} paycheck.</p>
             <div className="ob-glass ob-list">
-              {c.buckets.map((b, i) => (
+              {buckets.map((b, i) => (
                 <div key={b.name} className="ob-bucket">
                   <span className="nm">{b.name}<small>Goal {money(b.goal)} · per paycheck</small></span>
                   <span className="ob-stepper">
-                    <button aria-label={`Less to ${b.name}`} onClick={() => setC({ ...c, buckets: c.buckets.map((x, j) => (j === i ? { ...x, perPaycheck: Math.max(0, x.perPaycheck - 10) } : x)) })}>−</button>
+                    <button aria-label={`Less to ${b.name}`} onClick={() => setBuckets(buckets.map((x, j) => (j === i ? { ...x, perPaycheck: Math.max(0, x.perPaycheck - 10) } : x)))}>−</button>
                     <b>{money(b.perPaycheck)}</b>
-                    <button aria-label={`More to ${b.name}`} onClick={() => setC({ ...c, buckets: c.buckets.map((x, j) => (j === i ? { ...x, perPaycheck: x.perPaycheck + 10 } : x)) })}>+</button>
+                    <button aria-label={`More to ${b.name}`} onClick={() => setBuckets(buckets.map((x, j) => (j === i ? { ...x, perPaycheck: x.perPaycheck + 10 } : x)))}>+</button>
                   </span>
                 </div>
               ))}
             </div>
             <div className="ob-glass ob-cushion">
-              <div className="ob-between"><label className="ob-label dim" htmlFor="ob-cushion">Cushion</label><b>{money(c.cushion)}</b></div>
-              <input id="ob-cushion" type="range" min={0} max={500} step={25} value={c.cushion} onChange={(e) => setC({ ...c, cushion: +e.target.value })} />
+              <div className="ob-between"><label className="ob-label dim" htmlFor="ob-cushion">Cushion</label><b>{money(cushion)}</b></div>
+              <input id="ob-cushion" type="range" min={0} max={500} step={25} value={cushion} onChange={(e) => setCushion(+e.target.value)} />
               <p>Always kept back, so a surprise charge doesn&apos;t turn into an overdraft.</p>
             </div>
+            <Err />
             <div className="ob-grow" />
             <div className="ob-actions">
-              <button className="ob-btn" onClick={() => go("reveal")}>Continue</button>
-              <button className="ob-btn text" onClick={() => { setC({ ...c, buckets: c.buckets.map((b) => ({ ...b, perPaycheck: 0 })) }); go("reveal"); }}>Skip savings for now</button>
+              <button className="ob-btn" disabled={busy} onClick={() => saveAll()}>Continue</button>
+              <button className="ob-btn text" disabled={busy} onClick={() => saveAll(buckets.map((b) => ({ ...b, perPaycheck: 0 })))}>Skip savings for now</button>
             </div>
           </section>
         )}
 
-        {step === "reveal" && <Reveal key="reveal" value={safe} headingRef={headingRef} bills={heldBills} billTotal={billTotal} cushion={c.cushion} payday={shortDate(t.until)} short={t.pool < 0 ? -t.pool : 0} onDone={finish} />}
-      </div>
-
-      <div className={`ob-sheet-wrap ${sheet !== "closed" ? "on" : ""}`} aria-hidden={sheet === "closed"} onClick={(e) => e.target === e.currentTarget && setSheet("closed")}>
-        <div className="ob-sheet" role="dialog" aria-label="Connect your bank">
-          {sheet === "banks" && (
-            <>
-              <div className="ob-sh-top"><span>Bank connection · preview</span><button onClick={() => setSheet("closed")} aria-label="Close">×</button></div>
-              <h3>Select your bank</h3>
-              <div className="ob-search">Plaid&apos;s bank search opens here</div>
-              <div className="ob-banks">
-                {[["Harbor Federal", "#1f4e79"], ["Northline Bank", "#2e6b4f"], ["Summit Credit Union", "#7a3b2e"], ["First Meridian", "#4b3f72"]].map(([n, col]) => (
-                  <button key={n} onClick={() => setSheet("accounts")}><i style={{ background: col }}>{n[0]}</i>{n}</button>
-                ))}
-              </div>
-              <p className="ob-sh-note">Sign-in happens on your bank&apos;s own screen.</p>
-            </>
-          )}
-          {sheet === "accounts" && (
-            <>
-              <div className="ob-sh-top"><span>{EXAMPLE.bank}</span><span /></div>
-              <h3>Which accounts should Forecast see?</h3>
-              <div className="ob-accts">
-                {EXAMPLE.accounts.map((a, i) => (
-                  <label key={a.mask}>
-                    <input type="checkbox" checked={accounts[i]} onChange={() => setAccounts(accounts.map((v, j) => (j === i ? !v : v)))} />
-                    <span>{a.name}<small>•••• {a.mask}{a.note ? ` · ${a.note}` : ""}</small></span>
-                    <span>{money(a.balance)}</span>
-                  </label>
-                ))}
-              </div>
-              <button className="ob-sh-btn" onClick={() => { setSheet("closed"); go("reading"); }}>Continue</button>
-              <p className="ob-sh-note">Read-only access. You can change this later.</p>
-            </>
-          )}
-        </div>
+        {step === "reveal" && t && (
+          <Reveal key="reveal" value={Math.round(t.safeToSpend)} daily={t.daily} headingRef={headingRef} bills={t.billCount} billTotal={t.bills} cushion={cushion} payday={shortDate(t.until)} short={t.pool < 0 ? -t.pool : 0} onDone={finish} />
+        )}
+        {step === "reveal" && error && <Err />}
       </div>
     </div>
   );
 }
 
 function Reveal(props: {
-  value: number; bills: number; billTotal: number; cushion: number; payday: string; short: number;
+  value: number; daily: number; bills: number; billTotal: number; cushion: number; payday: string; short: number;
   headingRef: React.RefObject<HTMLHeadingElement | null>; onDone: () => void;
 }) {
   const [shown, setShown] = useState(0);
@@ -324,9 +488,12 @@ function Reveal(props: {
 
   const d = heroDate();
   const billsText = props.bills === 1 ? "one bill" : `${props.bills} bills`;
+  const cover = props.bills ? `cover ${billsText} (${money(props.billTotal)}) and ` : "";
   const line = props.short
     ? `You're ${money(props.short)} short of covering ${billsText} before you're paid on ${props.payday}, so today stays at $0.`
-    : `That's what you can spend today and still cover ${billsText} (${money(props.billTotal)}) and keep your ${money(props.cushion)} cushion until you're paid on ${props.payday}.`;
+    : props.value === 0 && props.daily > 0
+      ? `You've already spent today's ${money(props.daily)} share. It resets tomorrow, and you're paid on ${props.payday}.`
+      : `That's what you can spend today and still ${cover}keep your ${money(props.cushion)} cushion until you're paid on ${props.payday}.`;
 
   return (
     <section className="ob-view ob-reveal">

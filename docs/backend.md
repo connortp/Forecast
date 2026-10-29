@@ -38,7 +38,7 @@ Source in `supabase/functions`, shared code in `_shared`.
 | `create-link-token` | user JWT | Link token for a new bank, or `{ item_id }` for update mode (re-login). Sets the webhook and, if configured, `redirect_uri` for OAuth banks. Requests 730 days of history. |
 | `exchange-public-token` | user JWT | `{ public_token, institution }` from Link's `onSuccess`. Stores the item and token, saves the accounts from `/accounts/get`, runs a first sync, returns the accounts. |
 | `sync-transactions` | user JWT | Pull-to-refresh: syncs all of the user's banks, or `{ item_id }`. |
-| `sandbox-public-token` | user JWT | Sandbox only (404 in production). Makes a test-bank public token without opening Link; pass the result straight to `exchange-public-token`. |
+| `sandbox-public-token` | user JWT | Sandbox only (404 in production). Makes a test-bank public token without opening Link, as Plaid's `user_transactions_dynamic` (paychecks, bills, daily spending) unless `{ username }` says otherwise; pass the result straight to `exchange-public-token`. |
 | `plaid-webhook` | Plaid signature | `SYNC_UPDATES_AVAILABLE` syncs, `RECURRING_TRANSACTIONS_UPDATE` refreshes bills and paychecks, `ITEM` webhooks update the item's status. JWT check is off; every request is verified against the `Plaid-Verification` header instead. |
 
 Calling from a client:
