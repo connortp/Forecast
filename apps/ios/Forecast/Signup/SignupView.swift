@@ -546,6 +546,8 @@ private struct SignupSky: View {
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .clipped()
+            // Children of a GeometryReader still sit inside the safe area, so this one has to opt out too.
+            .ignoresSafeArea()
         }
         .ignoresSafeArea()
         .animation(.easeInOut(duration: 1.4), value: scene)
