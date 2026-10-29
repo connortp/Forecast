@@ -326,8 +326,12 @@ private struct OutlookChart: View {
         guard let first = p.first else { return path }
         path.move(to: first)
         let n = p.count
-        let d = (0..<(n - 1)).map { (p[$0 + 1].y - p[$0].y) / (p[$0 + 1].x - p[$0].x) }
-        let m = (0..<n).map { i in i == 0 ? d[0] : i == n - 1 ? d[n - 2] : d[i - 1] * d[i] <= 0 ? 0 : (d[i - 1] + d[i]) / 2 }
+        let d: [CGFloat] = (0..<(n - 1)).map { (p[$0 + 1].y - p[$0].y) / (p[$0 + 1].x - p[$0].x) }
+        let m: [CGFloat] = (0..<n).map { (i: Int) -> CGFloat in
+            if i == 0 { return d[0] }
+            if i == n - 1 { return d[n - 2] }
+            return d[i - 1] * d[i] <= 0 ? 0 : (d[i - 1] + d[i]) / 2
+        }
         for i in 0..<(n - 1) {
             let h = (p[i + 1].x - p[i].x) / 3
             path.addCurve(to: p[i + 1], control1: CGPoint(x: p[i].x + h, y: p[i].y + m[i] * h),
