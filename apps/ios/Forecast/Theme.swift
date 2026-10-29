@@ -5,6 +5,10 @@ import CoreText
 // Colors and type, matching apps/web/src/app/globals.css.
 enum Palette {
     static let sheet = Color(hex: 0x0A0A0B)
+    /// The navy of the sky's shade and the scrim behind the number.
+    static let shade = Color(hex: 0x080A16)
+    static let pay = Color(hex: 0x5B8FD6)
+    static let payLine = Color(hex: 0xCFE0FF)
     static let card = Color(hex: 0x121214)
     static let cardHi = Color(hex: 0x17171A)
     static let line = Color.white.opacity(0.08)
@@ -15,7 +19,7 @@ enum Palette {
     static let good = Color(hex: 0x8FE3B0)
     static let bad = Color(hex: 0xFF8D7A)
     static let rain = Color(hex: 0x8DB8FF)
-    static let buckets = [Color(hex: 0x8FE3B0), Color(hex: 0xFFB38A), Color(hex: 0x8DB8FF), Color(hex: 0xE4B5FF)]
+    static let buckets = [Color(hex: 0xA8E6C0), Color(hex: 0xFFC9A6), Color(hex: 0xA9C8FF), Color(hex: 0xE4C4FF)]
 }
 
 extension Color {
